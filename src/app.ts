@@ -25,4 +25,17 @@ app.post("/chat/send", async (req, res) => {
   }
 });
 
+app.post("/chat/receive", async (req, res) => {
+  const twilioRequestBody = req.body;
+  console.log(twilioRequestBody);
+  const messageBody = twilioRequestBody.Body;
+  const to = twilioRequestBody.From;
+  try {
+    await sendWhatsappMessage(to, messageBody);
+    res.status(200).json({ sucess: true, messageBody });
+  } catch {
+    res.status(500).json({ sucess: false, error });
+  }
+});
+
 app.listen(port, () => console.log(`servidor rodando em ${port}`));
