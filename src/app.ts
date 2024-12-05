@@ -4,6 +4,7 @@ const bodyParser = require("body-parser");
 const axios = require("axios");
 const { Twilio } = require("twilio");
 const { GoogleAuth } = require("google-auth-library"); // Importando Google Auth
+const path = require("path");
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -13,9 +14,15 @@ app.use(bodyParser.json());
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioClient = new Twilio(accountSid, authToken);
-// Configuração do Google Auth com Dialogflow
+
+// Defina o caminho diretamente, apenas para teste
+const caminhoCredenciais = path.resolve(
+  __dirname,
+  "src/services/credenciais.json"
+);
+
 const auth = new GoogleAuth({
-  keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS, // Usando variável de ambiente
+  keyFile: caminhoCredenciais, // Caminho direto para o arquivo
   scopes: ["https://www.googleapis.com/auth/dialogflow"],
 });
 
