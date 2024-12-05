@@ -15,7 +15,7 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioClient = new Twilio(accountSid, authToken);
 // Configuração do Google Auth com Dialogflow
 const auth = new GoogleAuth({
-  keyFile: "./src/services/credenciais.json", // Caminho relativo correto
+  keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS, // Usando variável de ambiente
   scopes: ["https://www.googleapis.com/auth/dialogflow"],
 });
 
