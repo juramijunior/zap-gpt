@@ -1,42 +1,65 @@
 import "dotenv/config";
 import express, { Request, Response } from "express";
-import bodyParser from "body-parser";
-import cors from "cors";
-import { sendWhatsappMessage } from "./services/twilio";
-import { error } from "console";
-import { getOpenAiCompletion } from "./services/openai";
+const bodyParser = require("body-parser");
+const axios = require("axios");
+const { Twilio } = require("twilio");
 
 const app = express();
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(cors());
-const port = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.send("ok");
-});
+// Configuração do Twilio
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const authToken = process.env.TWILIO_AUTH_TOKEN;
+const twilioClient = new Twilio(accountSid, authToken);
 
-app.post("/chat/send", async (req, res) => {
-  const { to, body } = req.body;
+// Configuração do Dialogflow
+const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID; // ID do seu projeto Dialogflow
+const DIALOGFLOW_SESSION_ID = process.env.DIALOGFLOW_SESSION_ID; // Pode ser um identificador qualquer
+const DIALOGFLOW_ACCESS_TOKEN = process.env.DIALOGFLOW_ACCESS_TOKEN; // Token de acesso Dialogflow
+
+// Rota Webhook para receber mensagens do Twilio
+app.post("/webhook", async (req, res) => {
+  const incomingMessage = req.body.Body; // Mensagem recebida do WhatsApp
+  const fromNumber = req.body.From; // Número do remetente
+
   try {
-    await sendWhatsappMessage(`whatsapp:${to}`, body);
-    res.status(200).json({ sucess: true, body });
-  } catch {
-    res.status(500).json({ sucess: false, error });
+    // Envia a mensagem para o Dialogflow
+    const dialogflowResponse = await axios.post(
+      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${DIALOGFLOW_SESSION_ID}:detectIntent`,
+      {
+        queryInput: {
+          text: {
+            text: incomingMessage,
+            languageCode: "pt-BR",
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${DIALOGFLOW_ACCESS_TOKEN}`,
+        },
+      }
+    );
+
+    const responseMessage = dialogflowResponse.data.queryResult.fulfillmentText;
+
+    // Envia a resposta ao WhatsApp via Twilio
+    await twilioClient.messages.create({
+      from: "whatsapp:+14155238886", // Número do Twilio para WhatsApp
+      to: fromNumber, // Número do usuário que enviou a mensagem
+      body: responseMessage,
+    });
+
+    res.status(200).send("Mensagem processada com sucesso");
+  } catch (error) {
+    console.error("Erro:", error);
+    res.status(500).send("Erro ao processar a mensagem");
   }
 });
 
-app.post("/chat/receive", async (req, res) => {
-  const twilioRequestBody = req.body;
-  const messageBody = twilioRequestBody.Body;
-  const to = twilioRequestBody.From;
-  try {
-    const completion = await getOpenAiCompletion(messageBody);
-    await sendWhatsappMessage(to, completion);
-    res.status(200).json({ sucess: true, messageBody });
-  } catch {
-    res.status(500).json({ sucess: false, error });
-  }
+// Iniciar o servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
-
-app.listen(port, () => console.log(`servidor rodando em ${port}`));
