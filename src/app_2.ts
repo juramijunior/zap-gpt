@@ -9,6 +9,7 @@ import * as uuid from "uuid";
 if (!credentialsJson) {
   throw new Error("As credenciais do Google não estão definidas.");
 }
+//teste
 
 // Parse do conteúdo da variável de ambiente para JSON
 const parsedCredentials = JSON.parse(credentialsJson);
