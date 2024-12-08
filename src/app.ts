@@ -32,7 +32,7 @@ const auth = new GoogleAuth({
 });
 
 // Configuração do Dialogflow
-const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
+const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID_BOOT;
 
 // Carrega as frases do arquivo JSON gerado anteriormente
 const trainingData = [
