@@ -143,7 +143,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
     // Processar lógica personalizada com base na intenção
     switch (intentName) {
       case "Horários Disponíveis":
-        const calendarId = "primary"; // Substitua pelo ID do calendário da clínica, se necessário
+        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
         console.log(`Buscando horários no fulfillment com ID: ${calendarId}`);
         const availableSlots = await getAvailableSlots(calendarId);
         responseText = `Os horários disponíveis são: ${availableSlots.join(
@@ -226,7 +226,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
   // Substitua pelo ID do calendário compartilhado
-  const calendarId = "jurami.junior@gmail.com";
-  addCalendarToServiceAccount(calendarId);
+  // const calendarId = "jurami.junior@gmail.com";
+  //addCalendarToServiceAccount(calendarId);
   listCalendars().catch(console.error);
 });
