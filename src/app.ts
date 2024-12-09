@@ -93,49 +93,52 @@ async function getAvailableSlots(
       const events = response.data.items || [];
       const freeSlots: string[] = [];
       let currentTime = new Date(startDate);
-      currentTime.setHours(workingHoursStart, 0, 0, 0);
+      currentTime.setHours(workingHoursStart, 0, 0, 0); // Começa no início do horário de trabalho
 
       const endTime = new Date(endDate);
 
-      // Log dos eventos retornados para debug
+      // Log para verificar eventos encontrados
       console.log("Eventos encontrados:");
       events.forEach((event) => {
         console.log(
-          "Evento:",
-          event.summary,
-          "Início:",
-          event.start?.dateTime || event.start?.date,
-          "Fim:",
-          event.end?.dateTime || event.end?.date
+          `Evento: ${event.summary}, Início: ${
+            event.start?.dateTime || event.start?.date
+          }, Fim: ${event.end?.dateTime || event.end?.date}`
         );
       });
 
       while (currentTime < endTime) {
-        const isFree = !events.some((event) => {
-          const eventStart = event.start?.dateTime
-            ? new Date(event.start.dateTime)
-            : event.start?.date
-            ? new Date(event.start.date)
-            : null;
-          const eventEnd = event.end?.dateTime
-            ? new Date(event.end.dateTime)
-            : event.end?.date
-            ? new Date(event.end.date)
-            : null;
+        // Filtrar apenas horários dentro do horário de trabalho
+        if (
+          currentTime.getHours() >= workingHoursStart &&
+          currentTime.getHours() < workingHoursEnd
+        ) {
+          const isFree = !events.some((event) => {
+            const eventStart = event.start?.dateTime
+              ? new Date(event.start.dateTime)
+              : event.start?.date
+              ? new Date(event.start.date)
+              : null;
+            const eventEnd = event.end?.dateTime
+              ? new Date(event.end.dateTime)
+              : event.end?.date
+              ? new Date(event.end.date)
+              : null;
 
-          if (!eventStart || !eventEnd) {
-            return false; // Ignora eventos inválidos
+            if (!eventStart || !eventEnd) {
+              return false; // Ignora eventos inválidos
+            }
+
+            return currentTime >= eventStart && currentTime < eventEnd;
+          });
+
+          if (isFree) {
+            freeSlots.push(
+              new Date(currentTime).toLocaleString("pt-BR", {
+                timeZone: "America/Sao_Paulo",
+              })
+            );
           }
-
-          return currentTime >= eventStart && currentTime < eventEnd;
-        });
-
-        if (isFree) {
-          freeSlots.push(
-            new Date(currentTime).toLocaleString("pt-BR", {
-              timeZone: "America/Sao_Paulo",
-            })
-          );
         }
 
         currentTime.setMinutes(currentTime.getMinutes() + timeIncrement);
