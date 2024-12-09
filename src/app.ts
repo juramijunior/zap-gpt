@@ -60,6 +60,7 @@ async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
 ): Promise<string[]> {
+  console.log(`Buscando horários no calendário com ID: ${calendarId}`);
   const workingHoursStart = 9; // 9h
   const workingHoursEnd = 18; // 18h
   const timeIncrement = 60; // Intervalo em minutos
@@ -125,6 +126,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
     switch (intentName) {
       case "Horários Disponíveis":
         const calendarId = "primary"; // Substitua pelo ID do calendário da clínica, se necessário
+        console.log(`Buscando horários no fulfillment com ID: ${calendarId}`);
         const availableSlots = await getAvailableSlots(calendarId);
         responseText = `Os horários disponíveis são: ${availableSlots.join(
           ", "
