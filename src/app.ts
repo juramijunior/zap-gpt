@@ -35,6 +35,18 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
+async function listCalendars() {
+  const response = await calendar.calendarList.list();
+  const calendars = response.data.items || [];
+
+  console.log("Calendários disponíveis:");
+  calendars.forEach((cal) => {
+    console.log(`- ${cal.summary} (ID: ${cal.id})`);
+  });
+
+  return calendars;
+}
+
 // Função para buscar horários disponíveis
 async function getAvailableSlots(
   calendarId: string,
@@ -185,4 +197,5 @@ app.post("/webhook", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
+  listCalendars().catch(console.error);
 });
