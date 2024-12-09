@@ -6,6 +6,7 @@ import { Twilio } from "twilio";
 import { GoogleAuth } from "google-auth-library";
 import { google } from "googleapis";
 import * as uuid from "uuid";
+import { toZonedTime } from "date-fns-tz";
 
 // Validação das credenciais do Google
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
@@ -68,7 +69,6 @@ async function listCalendars() {
   }
 }
 
-// Função para buscar horários disponíveis
 async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
@@ -76,86 +76,53 @@ async function getAvailableSlots(
   const workingHoursStart = 9; // 9h
   const workingHoursEnd = 18; // 18h
   const timeIncrement = 60; // Intervalo em minutos
+  const timeZone = "America/Sao_Paulo";
+
   let startDate = new Date();
   let endDate = new Date();
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
-  try {
-    while (true) {
-      const response = await calendar.events.list({
-        calendarId,
-        timeMin: startDate.toISOString(),
-        timeMax: endDate.toISOString(),
-        singleEvents: true,
-        orderBy: "startTime",
-      });
+  const freeSlots: string[] = [];
 
-      const events = response.data.items || [];
-      const freeSlots: string[] = [];
+  while (startDate < endDate) {
+    // Apenas terça-feira (2) e quarta-feira (3)
+    if (startDate.getDay() === 2 || startDate.getDay() === 3) {
       let currentTime = new Date(startDate);
-      currentTime.setHours(workingHoursStart, 0, 0, 0); // Começa no início do horário de trabalho
+      currentTime.setHours(workingHoursStart, 0, 0, 0);
+      currentTime = toZonedTime(currentTime, timeZone);
 
-      const endTime = new Date(endDate);
+      const endOfDay = new Date(startDate);
+      endOfDay.setHours(workingHoursEnd, 0, 0, 0);
 
-      // Log para verificar eventos encontrados
-      console.log("Eventos encontrados:");
-      events.forEach((event) => {
-        console.log(
-          `Evento: ${event.summary}, Início: ${
-            event.start?.dateTime || event.start?.date
-          }, Fim: ${event.end?.dateTime || event.end?.date}`
-        );
-      });
+      while (currentTime < endOfDay) {
+        const response = await calendar.events.list({
+          calendarId,
+          timeMin: currentTime.toISOString(),
+          timeMax: new Date(
+            currentTime.getTime() + timeIncrement * 60000
+          ).toISOString(),
+          singleEvents: true,
+          orderBy: "startTime",
+        });
 
-      while (currentTime < endTime) {
-        // Filtrar apenas horários dentro do horário de trabalho
-        if (
-          currentTime.getHours() >= workingHoursStart &&
-          currentTime.getHours() < workingHoursEnd
-        ) {
-          const isFree = !events.some((event) => {
-            const eventStart = event.start?.dateTime
-              ? new Date(event.start.dateTime)
-              : event.start?.date
-              ? new Date(event.start.date)
-              : null;
-            const eventEnd = event.end?.dateTime
-              ? new Date(event.end.dateTime)
-              : event.end?.date
-              ? new Date(event.end.date)
-              : null;
+        const events = response.data.items || [];
+        const isFree = events.length === 0;
 
-            if (!eventStart || !eventEnd) {
-              return false; // Ignora eventos inválidos
-            }
-
-            return currentTime >= eventStart && currentTime < eventEnd;
-          });
-
-          if (isFree) {
-            freeSlots.push(
-              new Date(currentTime).toLocaleString("pt-BR", {
-                timeZone: "America/Sao_Paulo",
-              })
-            );
-          }
+        if (isFree) {
+          freeSlots.push(
+            new Date(currentTime).toLocaleString("pt-BR", { timeZone })
+          );
         }
 
         currentTime.setMinutes(currentTime.getMinutes() + timeIncrement);
       }
-
-      if (freeSlots.length > 0) {
-        return freeSlots;
-      }
-
-      // Avançar mais semanas, se necessário
-      startDate.setDate(startDate.getDate() + weeksToSearch * 7);
-      endDate.setDate(endDate.getDate() + weeksToSearch * 7);
     }
-  } catch (error) {
-    console.error("Erro ao buscar horários disponíveis:", error);
-    throw new Error("Erro ao buscar horários disponíveis");
+
+    // Avançar para o próximo dia
+    startDate.setDate(startDate.getDate() + 1);
   }
+
+  return freeSlots;
 }
 
 // Função para lidar com Fulfillment do Dialogflow
