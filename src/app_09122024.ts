@@ -7,7 +7,7 @@ const { GoogleAuth } = require("google-auth-library");
 import { google } from "googleapis";
 import * as uuid from "uuid";
 
-// Validação das credenciais do Google
+// teste Validação das credenciais do Google
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 if (!credentialsJson) {
   throw new Error("As credenciais do Google não estão definidas.");
