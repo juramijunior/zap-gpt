@@ -50,16 +50,11 @@ async function addCalendarToServiceAccount(calendarId: string) {
   }
 }
 
-// Substitua pelo ID do calendário compartilhado
-const calendarId = "example_calendar_id@group.calendar.google.com";
-addCalendarToServiceAccount(calendarId);
-
 async function listCalendars() {
   try {
     const response = await calendar.calendarList.list();
     const calendars = response.data.items || [];
 
-    console.log("Calendários disponíveis:");
     if (calendars.length === 0) {
       console.log("Nenhum calendário disponível para a conta de serviço.");
     } else {
@@ -78,7 +73,6 @@ async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
 ): Promise<string[]> {
-  console.log(`Buscando horários no calendário com ID: ${calendarId}`);
   const workingHoursStart = 9; // 9h
   const workingHoursEnd = 18; // 18h
   const timeIncrement = 60; // Intervalo em minutos
@@ -86,50 +80,78 @@ async function getAvailableSlots(
   let endDate = new Date();
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
-  while (true) {
-    const response = await calendar.events.list({
-      calendarId,
-      timeMin: startDate.toISOString(),
-      timeMax: endDate.toISOString(),
-      singleEvents: true,
-      orderBy: "startTime",
-    });
-
-    const events = response.data.items || [];
-    const freeSlots: string[] = [];
-    let currentTime = new Date(startDate);
-    currentTime.setHours(workingHoursStart, 0, 0, 0);
-
-    const endTime = new Date(endDate);
-
-    while (currentTime < endTime) {
-      const isFree = !events.some((event) => {
-        const eventStart = new Date(
-          event.start?.dateTime || event.start?.date || ""
-        );
-        const eventEnd = new Date(event.end?.dateTime || event.end?.date || "");
-
-        return currentTime >= eventStart && currentTime < eventEnd;
+  try {
+    while (true) {
+      const response = await calendar.events.list({
+        calendarId,
+        timeMin: startDate.toISOString(),
+        timeMax: endDate.toISOString(),
+        singleEvents: true,
+        orderBy: "startTime",
       });
 
-      if (isFree) {
-        freeSlots.push(
-          new Date(currentTime).toLocaleString("pt-BR", {
-            timeZone: "America/Sao_Paulo",
-          })
+      const events = response.data.items || [];
+      const freeSlots: string[] = [];
+      let currentTime = new Date(startDate);
+      currentTime.setHours(workingHoursStart, 0, 0, 0);
+
+      const endTime = new Date(endDate);
+
+      // Log dos eventos retornados para debug
+      console.log("Eventos encontrados:");
+      events.forEach((event) => {
+        console.log(
+          "Evento:",
+          event.summary,
+          "Início:",
+          event.start?.dateTime || event.start?.date,
+          "Fim:",
+          event.end?.dateTime || event.end?.date
         );
+      });
+
+      while (currentTime < endTime) {
+        const isFree = !events.some((event) => {
+          const eventStart = event.start?.dateTime
+            ? new Date(event.start.dateTime)
+            : event.start?.date
+            ? new Date(event.start.date)
+            : null;
+          const eventEnd = event.end?.dateTime
+            ? new Date(event.end.dateTime)
+            : event.end?.date
+            ? new Date(event.end.date)
+            : null;
+
+          if (!eventStart || !eventEnd) {
+            return false; // Ignora eventos inválidos
+          }
+
+          return currentTime >= eventStart && currentTime < eventEnd;
+        });
+
+        if (isFree) {
+          freeSlots.push(
+            new Date(currentTime).toLocaleString("pt-BR", {
+              timeZone: "America/Sao_Paulo",
+            })
+          );
+        }
+
+        currentTime.setMinutes(currentTime.getMinutes() + timeIncrement);
       }
 
-      currentTime.setMinutes(currentTime.getMinutes() + timeIncrement);
-    }
+      if (freeSlots.length > 0) {
+        return freeSlots;
+      }
 
-    if (freeSlots.length > 0) {
-      return freeSlots;
+      // Avançar mais semanas, se necessário
+      startDate.setDate(startDate.getDate() + weeksToSearch * 7);
+      endDate.setDate(endDate.getDate() + weeksToSearch * 7);
     }
-
-    // Avançar mais semanas, se necessário
-    startDate.setDate(startDate.getDate() + weeksToSearch * 7);
-    endDate.setDate(endDate.getDate() + weeksToSearch * 7);
+  } catch (error) {
+    console.error("Erro ao buscar horários disponíveis:", error);
+    throw new Error("Erro ao buscar horários disponíveis");
   }
 }
 
@@ -144,7 +166,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
     switch (intentName) {
       case "Horários Disponíveis":
         const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
-        console.log(`Buscando horários no fulfillment com ID: ${calendarId}`);
         const availableSlots = await getAvailableSlots(calendarId);
         responseText = `Os horários disponíveis são: ${availableSlots.join(
           ", "
@@ -228,5 +249,5 @@ app.listen(PORT, () => {
   // Substitua pelo ID do calendário compartilhado
   // const calendarId = "jurami.junior@gmail.com";
   //addCalendarToServiceAccount(calendarId);
-  listCalendars().catch(console.error);
+  // listCalendars().catch(console.error);
 });
