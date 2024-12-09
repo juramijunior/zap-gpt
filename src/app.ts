@@ -1,9 +1,10 @@
 import "dotenv/config";
 import express, { Request, Response } from "express";
-const bodyParser = require("body-parser");
-const axios = require("axios");
-const { Twilio } = require("twilio");
-const { GoogleAuth } = require("google-auth-library");
+import bodyParser from "body-parser";
+import axios from "axios";
+import { Twilio } from "twilio";
+import { GoogleAuth } from "google-auth-library";
+import { google } from "googleapis";
 import * as uuid from "uuid";
 
 // Validação das credenciais do Google
@@ -20,7 +21,10 @@ const twilioClient = new Twilio(accountSid, authToken);
 
 const auth = new GoogleAuth({
   credentials: parsedCredentials,
-  scopes: ["https://www.googleapis.com/auth/dialogflow"],
+  scopes: [
+    "https://www.googleapis.com/auth/dialogflow",
+    "https://www.googleapis.com/auth/calendar",
+  ],
 });
 
 const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
@@ -28,6 +32,67 @@ const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+
+const calendar = google.calendar({ version: "v3", auth });
+
+// Função para buscar horários disponíveis
+async function getAvailableSlots(
+  calendarId: string,
+  weeksToSearch = 2
+): Promise<string[]> {
+  const workingHoursStart = 9; // 9h
+  const workingHoursEnd = 18; // 18h
+  const timeIncrement = 60; // Intervalo em minutos
+  let startDate = new Date();
+  let endDate = new Date();
+  endDate.setDate(startDate.getDate() + weeksToSearch * 7);
+
+  while (true) {
+    const response = await calendar.events.list({
+      calendarId,
+      timeMin: startDate.toISOString(),
+      timeMax: endDate.toISOString(),
+      singleEvents: true,
+      orderBy: "startTime",
+    });
+
+    const events = response.data.items || [];
+    const freeSlots: string[] = [];
+    let currentTime = new Date(startDate);
+    currentTime.setHours(workingHoursStart, 0, 0, 0);
+
+    const endTime = new Date(endDate);
+
+    while (currentTime < endTime) {
+      const isFree = !events.some((event) => {
+        const eventStart = new Date(
+          event.start?.dateTime || event.start?.date || ""
+        );
+        const eventEnd = new Date(event.end?.dateTime || event.end?.date || "");
+
+        return currentTime >= eventStart && currentTime < eventEnd;
+      });
+
+      if (isFree) {
+        freeSlots.push(
+          new Date(currentTime).toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo",
+          })
+        );
+      }
+
+      currentTime.setMinutes(currentTime.getMinutes() + timeIncrement);
+    }
+
+    if (freeSlots.length > 0) {
+      return freeSlots;
+    }
+
+    // Avançar mais semanas, se necessário
+    startDate.setDate(startDate.getDate() + weeksToSearch * 7);
+    endDate.setDate(endDate.getDate() + weeksToSearch * 7);
+  }
+}
 
 // Função para lidar com Fulfillment do Dialogflow
 app.post("/fulfillment", async (req: Request, res: Response) => {
@@ -38,6 +103,14 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
     // Processar lógica personalizada com base na intenção
     switch (intentName) {
+      case "Horários Disponíveis":
+        const calendarId = "primary"; // Substitua pelo ID do calendário da clínica, se necessário
+        const availableSlots = await getAvailableSlots(calendarId);
+        responseText = `Os horários disponíveis são: ${availableSlots.join(
+          ", "
+        )}. Qual prefere?`;
+        break;
+
       case "Agendamento de Consultas":
         const date = req.body.queryResult.parameters.date;
         responseText = `Consulta agendada para ${date}. Caso precise alterar, entre em contato.`;
@@ -72,12 +145,10 @@ app.post("/webhook", async (req, res) => {
   const fromNumber = req.body.From;
 
   try {
-    // Obter token de acesso do Google
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
-    const sessionId = uuid.v4(); // Criar ID de sessão único para cada interação
+    const sessionId = uuid.v4();
 
-    // Enviar mensagem para o Dialogflow
     const dialogflowResponse = await axios.post(
       `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
       {
@@ -97,10 +168,9 @@ app.post("/webhook", async (req, res) => {
 
     const responseMessage = dialogflowResponse.data.queryResult.fulfillmentText;
 
-    // Enviar resposta ao usuário via WhatsApp (Twilio)
     await twilioClient.messages.create({
-      from: "whatsapp:+14155238886", // Número do Twilio
-      to: fromNumber, // Número do usuário
+      from: "whatsapp:+14155238886",
+      to: fromNumber,
       body: responseMessage,
     });
 
