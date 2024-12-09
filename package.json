@@ -23,6 +23,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.1",
     "google-auth-library": "^9.15.0",
+    "googleapis": "^144.0.0",
     "openai": "^4.75.0",
     "twilio": "^5.3.6",
     "uuid": "^11.0.3"
