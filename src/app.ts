@@ -24,6 +24,7 @@ const auth = new GoogleAuth({
   scopes: [
     "https://www.googleapis.com/auth/dialogflow",
     "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.events",
   ],
 });
 
