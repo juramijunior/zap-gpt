@@ -36,6 +36,24 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
+async function addCalendarToServiceAccount(calendarId: string) {
+  try {
+    const response = await calendar.calendarList.insert({
+      requestBody: {
+        id: calendarId, // O ID do calendário compartilhado
+      },
+    });
+    console.log("Calendário adicionado à conta de serviço:", response.data);
+  } catch (error) {
+    const err = error as Error;
+    console.error("Erro ao adicionar calendários:", err.message);
+  }
+}
+
+// Substitua pelo ID do calendário compartilhado
+const calendarId = "example_calendar_id@group.calendar.google.com";
+addCalendarToServiceAccount(calendarId);
+
 async function listCalendars() {
   try {
     const response = await calendar.calendarList.list();
@@ -207,5 +225,8 @@ app.post("/webhook", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
+  // Substitua pelo ID do calendário compartilhado
+  const calendarId = "jurami.junior@gmail.com";
+  addCalendarToServiceAccount(calendarId);
   listCalendars().catch(console.error);
 });
