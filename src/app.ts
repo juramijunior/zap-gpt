@@ -36,15 +36,22 @@ app.use(bodyParser.json());
 const calendar = google.calendar({ version: "v3", auth });
 
 async function listCalendars() {
-  const response = await calendar.calendarList.list();
-  const calendars = response.data.items || [];
+  try {
+    const response = await calendar.calendarList.list();
+    const calendars = response.data.items || [];
 
-  console.log("Calendários disponíveis:");
-  calendars.forEach((cal) => {
-    console.log(`- ${cal.summary} (ID: ${cal.id})`);
-  });
-
-  return calendars;
+    console.log("Calendários disponíveis:");
+    if (calendars.length === 0) {
+      console.log("Nenhum calendário disponível para a conta de serviço.");
+    } else {
+      calendars.forEach((cal) => {
+        console.log(`- ${cal.summary} (ID: ${cal.id})`);
+      });
+    }
+  } catch (error) {
+    const err = error as Error;
+    console.error("Erro ao listar calendários:", err.message);
+  }
 }
 
 // Função para buscar horários disponíveis
