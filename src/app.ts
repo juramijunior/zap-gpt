@@ -1,95 +1,118 @@
-import { GoogleAuth } from "google-auth-library";
-import axios from "axios";
+import "dotenv/config";
+import express, { Request, Response } from "express";
+const bodyParser = require("body-parser");
+const axios = require("axios");
+const { Twilio } = require("twilio");
+const { GoogleAuth } = require("google-auth-library");
+import * as uuid from "uuid";
 
-// Configuração
-const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
+// Validação das credenciais do Google
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-
-if (!DIALOGFLOW_PROJECT_ID || !credentialsJson) {
-  throw new Error(
-    "Verifique as variáveis DIALOGFLOW_PROJECT_ID e GOOGLE_APPLICATION_CREDENTIALS_JSON."
-  );
+if (!credentialsJson) {
+  throw new Error("As credenciais do Google não estão definidas.");
 }
+const parsedCredentials = JSON.parse(credentialsJson);
+
+// Configuração do Twilio
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const authToken = process.env.TWILIO_AUTH_TOKEN;
+const twilioClient = new Twilio(accountSid, authToken);
 
 const auth = new GoogleAuth({
-  credentials: JSON.parse(credentialsJson),
+  credentials: parsedCredentials,
   scopes: ["https://www.googleapis.com/auth/dialogflow"],
 });
 
-// Função para adicionar frases de treinamento
-async function addTrainingPhrases(intentName: string, phrases: string[]) {
+const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
+
+const app = express();
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+
+// Função para lidar com Fulfillment do Dialogflow
+app.post("/fulfillment", async (req: Request, res: Response) => {
+  const intentName = req.body.queryResult.intent.displayName;
+
   try {
-    // Autenticação
-    const client = await auth.getClient();
-    const token = await client.getAccessToken();
+    let responseText = "Desculpe, não entendi sua solicitação.";
 
-    // Lista intenções
-    const response = await axios.get(
-      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/intents`,
-      {
-        headers: {
-          Authorization: `Bearer ${token.token}`,
-        },
-      }
-    );
+    // Processar lógica personalizada com base na intenção
+    switch (intentName) {
+      case "Agendamento de Consultas":
+        const date = req.body.queryResult.parameters.date;
+        responseText = `Consulta agendada para ${date}. Caso precise alterar, entre em contato.`;
+        break;
 
-    const intents = response.data.intents;
+      case "Cancelar Consulta":
+        responseText = "Sua consulta foi cancelada com sucesso.";
+        break;
 
-    // Localiza a intenção pelo nome
-    const intent = intents.find((i: any) => i.displayName === intentName);
-    if (!intent) {
-      throw new Error(`Intenção '${intentName}' não encontrada.`);
+      case "Horários Disponíveis":
+        responseText =
+          "Os horários disponíveis são: 10:00, 13:00 e 15:30. Qual prefere?";
+        break;
+
+      default:
+        responseText = `Eu recebi sua solicitação na intenção "${intentName}", mas ainda não consigo tratá-la.`;
     }
 
-    // Atualiza as frases de treinamento
-    const updatedIntent = {
-      ...intent,
-      trainingPhrases: [
-        ...(intent.trainingPhrases || []),
-        ...phrases.map((text) => ({
-          type: "EXAMPLE",
-          parts: [{ text }],
-        })),
-      ],
-    };
-
-    // Atualiza a intenção
-    await axios.patch(
-      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/intents/${intent.name
-        .split("/")
-        .pop()}`,
-      updatedIntent,
-      {
-        headers: {
-          Authorization: `Bearer ${token.token}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log(`Frases adicionadas à intenção: ${intentName}`);
-  } catch (error: any) {
-    if (axios.isAxiosError(error)) {
-      // Erro gerado pelo Axios
-      console.error(
-        "Erro ao adicionar frases:",
-        error.response?.data || error.message
-      );
-    } else {
-      // Outros tipos de erro
-      console.error("Erro inesperado:", error);
-    }
+    // Retorna a resposta ao Dialogflow
+    res.json({
+      fulfillmentText: responseText,
+    });
+  } catch (error) {
+    console.error("Erro no Fulfillment:", error);
+    res.status(500).send("Erro ao processar a intenção.");
   }
-}
+});
 
-// Testando a função
-(async () => {
-  const intentName = "Agendamento de Consultas"; // Nome da intenção
-  const phrases = [
-    "Gostaria de marcar uma consulta.",
-    "Preciso remarcar meu horário.",
-    "Quais horários estão disponíveis?",
-  ]; // Frases de exemplo
+// Rota para receber mensagens do Twilio e processar via Dialogflow
+app.post("/webhook", async (req, res) => {
+  const incomingMessage = req.body.Body;
+  const fromNumber = req.body.From;
 
-  await addTrainingPhrases(intentName, phrases);
-})();
+  try {
+    // Obter token de acesso do Google
+    const client = await auth.getClient();
+    const accessToken = await client.getAccessToken();
+    const sessionId = uuid.v4(); // Criar ID de sessão único para cada interação
+
+    // Enviar mensagem para o Dialogflow
+    const dialogflowResponse = await axios.post(
+      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
+      {
+        queryInput: {
+          text: {
+            text: incomingMessage,
+            languageCode: "pt-BR",
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken.token}`,
+        },
+      }
+    );
+
+    const responseMessage = dialogflowResponse.data.queryResult.fulfillmentText;
+
+    // Enviar resposta ao usuário via WhatsApp (Twilio)
+    await twilioClient.messages.create({
+      from: "whatsapp:+14155238886", // Número do Twilio
+      to: fromNumber, // Número do usuário
+      body: responseMessage,
+    });
+
+    res.status(200).send("Mensagem processada com sucesso.");
+  } catch (error) {
+    console.error("Erro ao processar a mensagem:", error);
+    res.status(500).send("Erro ao processar a mensagem.");
+  }
+});
+
+// Iniciar o servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
