@@ -1,83 +1,95 @@
-import "dotenv/config";
-import express, { Request, Response } from "express";
-const bodyParser = require("body-parser");
-const axios = require("axios");
-const { Twilio } = require("twilio");
-const { GoogleAuth } = require("google-auth-library"); // Importando Google Auth
+import { GoogleAuth } from "google-auth-library";
+import axios from "axios";
+
+// Configuração
+const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-import * as uuid from "uuid";
-if (!credentialsJson) {
-  throw new Error("As credenciais do Google não estão definidas.");
+
+if (!DIALOGFLOW_PROJECT_ID || !credentialsJson) {
+  throw new Error(
+    "Verifique as variáveis DIALOGFLOW_PROJECT_ID e GOOGLE_APPLICATION_CREDENTIALS_JSON."
+  );
 }
-//teste2
-
-// Parse do conteúdo da variável de ambiente para JSON
-const parsedCredentials = JSON.parse(credentialsJson);
-
-const app = express();
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
-
-// Configuração do Twilio
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const twilioClient = new Twilio(accountSid, authToken);
 
 const auth = new GoogleAuth({
-  credentials: parsedCredentials,
+  credentials: JSON.parse(credentialsJson),
   scopes: ["https://www.googleapis.com/auth/dialogflow"],
 });
 
-const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
-const sessionId = uuid.v4(); // Usando a biblioteca 'uuid' para gerar um ID aleatório
-const DIALOGFLOW_SESSION_ID = sessionId;
-
-// Rota Webhook para receber mensagens do Twilio
-app.post("/webhook", async (req, res) => {
-  const incomingMessage = req.body.Body; // Mensagem recebida do WhatsApp
-  const fromNumber = req.body.From; // Número do remetente
-
+// Função para adicionar frases de treinamento
+async function addTrainingPhrases(intentName: string, phrases: string[]) {
   try {
-    // Obtém o token de acesso dinamicamente
+    // Autenticação
     const client = await auth.getClient();
-    const accessToken = await client.getAccessToken();
+    const token = await client.getAccessToken();
 
-    // Envia a mensagem para o Dialogflow
-    const dialogflowResponse = await axios.post(
-      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${DIALOGFLOW_SESSION_ID}:detectIntent`,
-      {
-        queryInput: {
-          text: {
-            text: incomingMessage,
-            languageCode: "pt-BR",
-          },
-        },
-      },
+    // Lista intenções
+    const response = await axios.get(
+      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/intents`,
       {
         headers: {
-          Authorization: `Bearer ${accessToken.token}`,
+          Authorization: `Bearer ${token.token}`,
         },
       }
     );
 
-    const responseMessage = dialogflowResponse.data.queryResult.fulfillmentText;
+    const intents = response.data.intents;
 
-    // Envia a resposta ao WhatsApp via Twilio
-    await twilioClient.messages.create({
-      from: "whatsapp:+14155238886", // Número do Twilio para WhatsApp
-      to: fromNumber, // Número do usuário que enviou a mensagem
-      body: responseMessage,
-    });
+    // Localiza a intenção pelo nome
+    const intent = intents.find((i: any) => i.displayName === intentName);
+    if (!intent) {
+      throw new Error(`Intenção '${intentName}' não encontrada.`);
+    }
 
-    res.status(200).send("Mensagem processada com sucesso");
-  } catch (error) {
-    console.error("Erro:", error);
-    res.status(500).send("Erro ao processar a mensagem");
+    // Atualiza as frases de treinamento
+    const updatedIntent = {
+      ...intent,
+      trainingPhrases: [
+        ...(intent.trainingPhrases || []),
+        ...phrases.map((text) => ({
+          type: "EXAMPLE",
+          parts: [{ text }],
+        })),
+      ],
+    };
+
+    // Atualiza a intenção
+    await axios.patch(
+      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/intents/${intent.name
+        .split("/")
+        .pop()}`,
+      updatedIntent,
+      {
+        headers: {
+          Authorization: `Bearer ${token.token}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log(`Frases adicionadas à intenção: ${intentName}`);
+  } catch (error: any) {
+    if (axios.isAxiosError(error)) {
+      // Erro gerado pelo Axios
+      console.error(
+        "Erro ao adicionar frases:",
+        error.response?.data || error.message
+      );
+    } else {
+      // Outros tipos de erro
+      console.error("Erro inesperado:", error);
+    }
   }
-});
+}
 
-// Iniciar o servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+// Testando a função
+(async () => {
+  const intentName = "Agendamento de Consultas"; // Nome da intenção
+  const phrases = [
+    "Gostaria de marcar uma consulta.",
+    "Preciso remarcar meu horário.",
+    "Quais horários estão disponíveis?",
+  ]; // Frases de exemplo
+
+  await addTrainingPhrases(intentName, phrases);
+})();
