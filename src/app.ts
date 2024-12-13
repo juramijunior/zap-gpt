@@ -430,3 +430,13 @@ app.post("/webhook", async (req, res) => {
     res.status(500).send("Erro ao processar a mensagem.");
   }
 });
+
+// Iniciar o servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+  // Substitua pelo ID do calendário compartilhado
+  // const calendarId = "jurami.junior@gmail.com";
+  //addCalendarToServiceAccount(calendarId);
+  // listCalendars().catch(console.error);
+});
