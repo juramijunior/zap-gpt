@@ -179,6 +179,61 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         )}. Qual prefere?`;
         break;
 
+      case "Selecionar Horário": {
+        const slotIndex =
+          parseInt(req.body.queryResult.parameters.slotNumber) - 1;
+        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
+        const availableSlots = await getAvailableSlots(calendarId);
+        const selectedSlot = availableSlots[slotIndex];
+
+        if (!selectedSlot) {
+          responseText =
+            "O horário selecionado não é válido. Por favor, escolha outro.";
+        } else {
+          // Criar evento no Google Calendar
+          const event = {
+            summary: "Consulta",
+            description: "Consulta médica agendada pelo sistema.",
+            start: {
+              dateTime: new Date(selectedSlot).toISOString(),
+              timeZone: "America/Sao_Paulo",
+            },
+            end: {
+              dateTime: new Date(
+                new Date(selectedSlot).getTime() + 60 * 60000
+              ).toISOString(), // Duração de 1 hora
+              timeZone: "America/Sao_Paulo",
+            },
+          };
+
+          await calendar.events.insert({
+            calendarId, // ID do calendário
+            requestBody: event, // Corpo do evento
+          });
+
+          responseText = `Consulta marcada com sucesso para ${selectedSlot}.`;
+        }
+
+        break;
+      }
+
+      case "Marcar Consulta": {
+        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
+        const availableSlots = await getAvailableSlots(calendarId);
+
+        if (availableSlots.length === 0) {
+          responseText =
+            "Não há horários disponíveis. Por favor, tente novamente mais tarde.";
+        } else {
+          responseText = `Os horários disponíveis são: ${availableSlots
+            .map((slot, index) => `${index + 1}) ${slot}`)
+            .join(
+              ", "
+            )}. Por favor, escolha um número correspondente ao horário.`;
+        }
+        break;
+      }
+
       case "Agendamento de Consultas":
         const date = req.body.queryResult.parameters.date;
         responseText = `Consulta agendada para ${date}. Caso precise alterar, entre em contato.`;
