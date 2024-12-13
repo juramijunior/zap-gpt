@@ -68,7 +68,6 @@ async function listCalendars() {
   }
 }
 
-// Função para buscar horários disponíveis
 async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
@@ -81,77 +80,72 @@ async function getAvailableSlots(
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
   try {
-    while (true) {
-      const response = await calendar.events.list({
-        calendarId,
-        timeMin: startDate.toISOString(),
-        timeMax: endDate.toISOString(),
-        singleEvents: true,
-        orderBy: "startTime",
-      });
+    const response = await calendar.events.list({
+      calendarId,
+      timeMin: startDate.toISOString(),
+      timeMax: endDate.toISOString(),
+      singleEvents: true,
+      orderBy: "startTime",
+    });
 
-      const events = response.data.items || [];
-      const freeSlots: string[] = [];
-      let currentTime = new Date(startDate);
-      currentTime.setHours(workingHoursStart, 0, 0, 0); // Começa no início do horário de trabalho
+    const events = response.data.items || [];
+    const freeSlots: string[] = [];
+    let currentTime = new Date(startDate);
+    currentTime.setHours(workingHoursStart, 0, 0, 0); // Começa no horário inicial de trabalho
 
-      const endTime = new Date(endDate);
+    const endTime = new Date(endDate);
+    endTime.setHours(workingHoursEnd, 0, 0, 0); // Termina no horário final de trabalho
 
-      // Log para verificar eventos encontrados
-      console.log("Eventos encontrados:");
-      events.forEach((event) => {
-        console.log(
-          `Evento: ${event.summary}, Início: ${
-            event.start?.dateTime || event.start?.date
-          }, Fim: ${event.end?.dateTime || event.end?.date}`
-        );
-      });
+    // Log para verificar eventos encontrados
+    console.log("Eventos encontrados:");
+    events.forEach((event) => {
+      console.log(
+        `Evento: ${event.summary}, Início: ${
+          event.start?.dateTime || event.start?.date
+        }, Fim: ${event.end?.dateTime || event.end?.date}`
+      );
+    });
 
-      while (currentTime < endTime) {
-        // Filtrar apenas horários dentro do horário de trabalho
-        if (
-          currentTime.getHours() >= workingHoursStart &&
-          currentTime.getHours() < workingHoursEnd
-        ) {
-          const isFree = !events.some((event) => {
-            const eventStart = event.start?.dateTime
-              ? new Date(event.start.dateTime)
-              : event.start?.date
-              ? new Date(event.start.date)
-              : null;
-            const eventEnd = event.end?.dateTime
-              ? new Date(event.end.dateTime)
-              : event.end?.date
-              ? new Date(event.end.date)
-              : null;
+    while (currentTime < endTime) {
+      // Reiniciar para o próximo dia útil
+      if (currentTime.getHours() >= workingHoursEnd) {
+        currentTime.setDate(currentTime.getDate() + 1);
+        currentTime.setHours(workingHoursStart, 0, 0, 0);
+        continue;
+      }
 
-            if (!eventStart || !eventEnd) {
-              return false; // Ignora eventos inválidos
-            }
+      // Verificar se o horário está livre
+      const isFree = !events.some((event) => {
+        const eventStart = event.start?.dateTime
+          ? new Date(event.start.dateTime)
+          : event.start?.date
+          ? new Date(event.start.date)
+          : null;
+        const eventEnd = event.end?.dateTime
+          ? new Date(event.end.dateTime)
+          : event.end?.date
+          ? new Date(event.end.date)
+          : null;
 
-            return currentTime >= eventStart && currentTime < eventEnd;
-          });
-
-          if (isFree) {
-            freeSlots.push(
-              new Date(currentTime).toLocaleString("pt-BR", {
-                timeZone: "America/Sao_Paulo",
-              })
-            );
-          }
+        if (!eventStart || !eventEnd) {
+          return false; // Ignora eventos inválidos
         }
 
-        currentTime.setMinutes(currentTime.getMinutes() + timeIncrement);
+        return currentTime >= eventStart && currentTime < eventEnd;
+      });
+
+      if (isFree) {
+        freeSlots.push(
+          new Date(currentTime).toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo",
+          })
+        );
       }
 
-      if (freeSlots.length > 0) {
-        return freeSlots;
-      }
-
-      // Avançar mais semanas, se necessário
-      startDate.setDate(startDate.getDate() + weeksToSearch * 7);
-      endDate.setDate(endDate.getDate() + weeksToSearch * 7);
+      currentTime.setMinutes(currentTime.getMinutes() + timeIncrement); // Incrementa o horário
     }
+
+    return freeSlots;
   } catch (error) {
     console.error("Erro ao buscar horários disponíveis:", error);
     throw new Error("Erro ao buscar horários disponíveis");
