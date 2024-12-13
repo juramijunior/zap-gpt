@@ -325,26 +325,29 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   }
 });
 
-// Rota para receber mensagens do Twilio e processar via Dialogflow
-app.post("/webhook", async (req, res) => {
+app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
     // Verificar se req.body e propriedades básicas existem
-    if (!req.body || !req.body.From || !req.body.Body) {
+    if (
+      !req.body ||
+      !req.body.From ||
+      (!req.body.Body && !req.body.Interactive)
+    ) {
       console.error("Requisição inválida recebida:", req.body);
       res.status(400).send("Requisição inválida.");
       return;
     }
 
-    const fromNumber = req.body.From; // Número do remetente
-    const incomingMessage = req.body.Body; // Mensagem recebida
-    const interactiveResponse = req.body.Interactive || {}; // Mensagem interativa, se existir
+    const fromNumber = req.body.From;
+    const incomingMessage = req.body.Body || "";
+    const interactiveResponse = req.body.Interactive || {};
 
-    // Autenticação com o Google
+    // Inicializar cliente do Google Auth
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
     const sessionId = uuid.v4();
 
-    // 1. Processar Resposta Interativa
+    // Processar Mensagens Interativas
     if (interactiveResponse.list_reply) {
       const selectedOptionId = interactiveResponse.list_reply.id;
 
@@ -357,11 +360,13 @@ app.post("/webhook", async (req, res) => {
 
         if (!availableSlots[slotIndex]) {
           console.error("Slot selecionado não encontrado:", selectedOptionId);
+
           await twilioClient.messages.create({
             from: "whatsapp:+14155238886",
             to: fromNumber,
             body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
           });
+
           res.status(200).send("Slot inválido processado.");
           return;
         }
@@ -403,33 +408,40 @@ app.post("/webhook", async (req, res) => {
       }
     }
 
-    // 2. Processar Mensagem Normal
-    const dialogflowResponse = await axios.post(
-      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
-      {
-        queryInput: {
-          text: {
-            text: incomingMessage,
-            languageCode: "pt-BR",
+    // Processar Mensagens Normais
+    if (incomingMessage) {
+      const dialogflowResponse = await axios.post(
+        `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
+        {
+          queryInput: {
+            text: {
+              text: incomingMessage,
+              languageCode: "pt-BR",
+            },
           },
         },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken.token}`,
-        },
-      }
-    );
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken.token}`,
+          },
+        }
+      );
 
-    const responseMessage = dialogflowResponse.data.queryResult.fulfillmentText;
+      const responseMessage =
+        dialogflowResponse.data.queryResult.fulfillmentText;
 
-    await twilioClient.messages.create({
-      from: "whatsapp:+14155238886",
-      to: fromNumber,
-      body: responseMessage,
-    });
+      await twilioClient.messages.create({
+        from: "whatsapp:+14155238886",
+        to: fromNumber,
+        body: responseMessage,
+      });
 
-    res.status(200).send("Mensagem processada com sucesso.");
+      res.status(200).send("Mensagem processada com sucesso.");
+      return;
+    }
+
+    // Caso nenhuma das condições acima seja atendida
+    res.status(400).send("Requisição não pôde ser processada.");
   } catch (error) {
     console.error("Erro ao processar a mensagem:", error);
 
