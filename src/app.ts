@@ -218,19 +218,59 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       }
 
       case "Marcar Consulta": {
-        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
+        const date = req.body.queryResult.parameters.data; // Captura o parâmetro 'data'
+        const time = req.body.queryResult.parameters.hora_consulta; // Captura o parâmetro 'hora_consulta'
+
+        if (!date || !time) {
+          responseText =
+            "Por favor, forneça uma data e horário para a consulta.";
+          break;
+        }
+
+        // Combine a data e hora em um único objeto Date
+        const selectedSlot = new Date(`${date}T${time}`);
+
+        // Verifique se o horário está disponível (opcional)
+        const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
 
-        if (availableSlots.length === 0) {
+        if (
+          !availableSlots.includes(
+            selectedSlot.toLocaleString("pt-BR", {
+              timeZone: "America/Sao_Paulo",
+            })
+          )
+        ) {
           responseText =
-            "Não há horários disponíveis. Por favor, tente novamente mais tarde.";
-        } else {
-          responseText = `Os horários disponíveis são: ${availableSlots
-            .map((slot, index) => `${index + 1}) ${slot}`)
-            .join(
-              ", "
-            )}. Por favor, escolha um número correspondente ao horário.`;
+            "O horário escolhido não está disponível. Por favor, escolha outro horário.";
+          break;
         }
+
+        // Criar evento no Google Calendar
+        const event = {
+          summary: "Consulta",
+          description: "Consulta médica agendada pelo sistema.",
+          start: {
+            dateTime: selectedSlot.toISOString(),
+            timeZone: "America/Sao_Paulo",
+          },
+          end: {
+            dateTime: new Date(
+              selectedSlot.getTime() + 60 * 60000
+            ).toISOString(), // Duração de 1 hora
+            timeZone: "America/Sao_Paulo",
+          },
+        };
+
+        await calendar.events.insert({
+          calendarId,
+          requestBody: event,
+        });
+
+        responseText = `Consulta marcada com sucesso para ${selectedSlot.toLocaleString(
+          "pt-BR",
+          { timeZone: "America/Sao_Paulo" }
+        )}.`;
         break;
       }
 
