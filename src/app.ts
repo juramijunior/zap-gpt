@@ -325,11 +325,9 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   }
 });
 
-// Rota para receber mensagens do Twilio e processar via Dialogflow
-// Rota para receber mensagens do Twilio e processar via Dialogflow
 app.post("/webhook", async (req, res) => {
-  const incomingMessage = req.body.Body; // Corpo da mensagem
-  const fromNumber = req.body.From; // Número do remetente
+  const incomingMessage = req.body.Body || ""; // Mensagem enviada pelo usuário
+  const fromNumber = req.body.From || ""; // Número do remetente
   const interactiveResponse = req.body.Interactive; // Resposta interativa, se existir
 
   try {
@@ -353,13 +351,17 @@ app.post("/webhook", async (req, res) => {
 
         if (!selectedSlot) {
           console.error("Slot selecionado não encontrado:", selectedOptionId);
-          await twilioClient.messages.create({
-            from: "whatsapp:+14155238886",
-            to: fromNumber,
-            body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
-          });
+
+          if (fromNumber) {
+            await twilioClient.messages.create({
+              from: "whatsapp:+14155238886",
+              to: fromNumber,
+              body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
+            });
+          }
+
           res.status(400).send("Slot não encontrado.");
-          return;
+          return; // Interrompe a execução para evitar múltiplas respostas
         }
 
         const [day, time] = selectedSlot.split(",").map((s) => s.trim());
@@ -387,14 +389,16 @@ app.post("/webhook", async (req, res) => {
         });
 
         // Confirmar o agendamento ao usuário
-        await twilioClient.messages.create({
-          from: "whatsapp:+14155238886",
-          to: fromNumber,
-          body: `Consulta marcada com sucesso para ${day} às ${time}.`,
-        });
+        if (fromNumber) {
+          await twilioClient.messages.create({
+            from: "whatsapp:+14155238886",
+            to: fromNumber,
+            body: `Consulta marcada com sucesso para ${day} às ${time}.`,
+          });
+        }
 
         res.status(200).send("Consulta marcada com sucesso.");
-        return;
+        return; // Interrompe a execução
       }
     }
 
@@ -418,16 +422,21 @@ app.post("/webhook", async (req, res) => {
 
     const responseMessage = dialogflowResponse.data.queryResult.fulfillmentText;
 
-    await twilioClient.messages.create({
-      from: "whatsapp:+14155238886",
-      to: fromNumber,
-      body: responseMessage,
-    });
+    if (fromNumber) {
+      await twilioClient.messages.create({
+        from: "whatsapp:+14155238886",
+        to: fromNumber,
+        body: responseMessage,
+      });
+    }
 
     res.status(200).send("Mensagem processada com sucesso.");
   } catch (error) {
     console.error("Erro ao processar a mensagem:", error);
-    res.status(500).send("Erro ao processar a mensagem.");
+
+    if (!res.headersSent) {
+      res.status(500).send("Erro ao processar a mensagem.");
+    }
   }
 });
 
