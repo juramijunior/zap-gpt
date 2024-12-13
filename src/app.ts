@@ -6,6 +6,7 @@ import { Twilio } from "twilio";
 import { GoogleAuth } from "google-auth-library";
 import { google } from "googleapis";
 import * as uuid from "uuid";
+const { utcToZonedTime, format } = require("date-fns-tz");
 
 // Validação das credenciais do Google
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
@@ -14,7 +15,7 @@ if (!credentialsJson) {
 }
 const parsedCredentials = JSON.parse(credentialsJson);
 
-// Configuração do Twilio
+// Configuração do Twilionpm install date-fns date-fns-tz
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioClient = new Twilio(accountSid, authToken);
@@ -73,7 +74,8 @@ async function getAvailableSlots(
   weeksToSearch = 2
 ): Promise<string[]> {
   const timeIncrement = 60; // Intervalo em minutos
-  let startDate = new Date();
+  const timeZone = "America/Sao_Paulo"; // Defina o fuso horário correto
+  let startDate = utcToZonedTime(new Date(), timeZone); // Convertendo o início ao fuso horário correto
   let endDate = new Date();
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
@@ -89,7 +91,7 @@ async function getAvailableSlots(
     const events = response.data.items || [];
     const freeSlots: string[] = [];
 
-    const currentDate = new Date(startDate);
+    const currentDate = utcToZonedTime(startDate, timeZone);
 
     while (currentDate < endDate) {
       const dayOfWeek = currentDate.getDay(); // 0 (Domingo) a 6 (Sábado)
@@ -118,14 +120,14 @@ async function getAvailableSlots(
       while (currentDate.getHours() < endHour) {
         const isFree = !events.some((event) => {
           const eventStart = event.start?.dateTime
-            ? new Date(event.start.dateTime)
+            ? utcToZonedTime(new Date(event.start.dateTime), timeZone)
             : event.start?.date
-            ? new Date(event.start.date)
+            ? utcToZonedTime(new Date(event.start.date), timeZone)
             : null;
           const eventEnd = event.end?.dateTime
-            ? new Date(event.end.dateTime)
+            ? utcToZonedTime(new Date(event.end.dateTime), timeZone)
             : event.end?.date
-            ? new Date(event.end.date)
+            ? utcToZonedTime(new Date(event.end.date), timeZone)
             : null;
 
           if (!eventStart || !eventEnd) {
@@ -137,9 +139,7 @@ async function getAvailableSlots(
 
         if (isFree) {
           freeSlots.push(
-            new Date(currentDate).toLocaleString("pt-BR", {
-              timeZone: "America/Sao_Paulo",
-            })
+            format(currentDate, "dd/MM/yyyy, HH:mm:ss", { timeZone })
           );
         }
 
