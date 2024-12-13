@@ -328,15 +328,15 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 // Rota para receber mensagens do Twilio e processar via Dialogflow
 app.post("/webhook", async (req, res) => {
   try {
-    // Verificar se as propriedades essenciais existem
-    if (!req.body || !req.body.From) {
-      console.error("Webhook recebido sem informações essenciais:", req.body);
-      res.status(400).send("Dados insuficientes no webhook.");
+    // Verificar se req.body e propriedades básicas existem
+    if (!req.body || !req.body.From || !req.body.Body) {
+      console.error("Requisição inválida recebida:", req.body);
+      res.status(400).send("Requisição inválida.");
       return;
     }
 
-    const fromNumber = req.body.From;
-    const incomingMessage = req.body.Body || ""; // Mensagem normal
+    const fromNumber = req.body.From; // Número do remetente
+    const incomingMessage = req.body.Body; // Mensagem recebida
     const interactiveResponse = req.body.Interactive || {}; // Mensagem interativa, se existir
 
     // Autenticação com o Google
@@ -433,6 +433,7 @@ app.post("/webhook", async (req, res) => {
   } catch (error) {
     console.error("Erro ao processar a mensagem:", error);
 
+    // Evitar múltiplas respostas
     if (!res.headersSent) {
       res.status(500).send("Erro ao processar a mensagem.");
     }
