@@ -6,7 +6,10 @@ import { Twilio } from "twilio";
 import { GoogleAuth } from "google-auth-library";
 import { google } from "googleapis";
 import * as uuid from "uuid";
-const { utcToZonedTime, format } = require("date-fns-tz");
+import * as dateFnsTz from "date-fns-tz";
+
+const toZonedTime = dateFnsTz.toZonedTime;
+const format = dateFnsTz.format;
 
 // Validação das credenciais do Google
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
@@ -75,7 +78,7 @@ async function getAvailableSlots(
 ): Promise<string[]> {
   const timeIncrement = 60; // Intervalo em minutos
   const timeZone = "America/Sao_Paulo"; // Defina o fuso horário correto
-  let startDate = utcToZonedTime(new Date(), timeZone); // Convertendo o início ao fuso horário correto
+  let startDate = new Date(); // Data inicial
   let endDate = new Date();
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
@@ -91,7 +94,7 @@ async function getAvailableSlots(
     const events = response.data.items || [];
     const freeSlots: string[] = [];
 
-    const currentDate = utcToZonedTime(startDate, timeZone);
+    let currentDate = toZonedTime(startDate, timeZone); // Converte para o fuso horário correto
 
     while (currentDate < endDate) {
       const dayOfWeek = currentDate.getDay(); // 0 (Domingo) a 6 (Sábado)
@@ -111,6 +114,7 @@ async function getAvailableSlots(
       } else {
         // Ignorar outros dias
         currentDate.setDate(currentDate.getDate() + 1);
+        currentDate = toZonedTime(currentDate, timeZone); // Atualiza o fuso horário para o próximo dia
         continue;
       }
 
@@ -120,14 +124,14 @@ async function getAvailableSlots(
       while (currentDate.getHours() < endHour) {
         const isFree = !events.some((event) => {
           const eventStart = event.start?.dateTime
-            ? utcToZonedTime(new Date(event.start.dateTime), timeZone)
+            ? toZonedTime(new Date(event.start.dateTime), timeZone)
             : event.start?.date
-            ? utcToZonedTime(new Date(event.start.date), timeZone)
+            ? toZonedTime(new Date(event.start.date), timeZone)
             : null;
           const eventEnd = event.end?.dateTime
-            ? utcToZonedTime(new Date(event.end.dateTime), timeZone)
+            ? toZonedTime(new Date(event.end.dateTime), timeZone)
             : event.end?.date
-            ? utcToZonedTime(new Date(event.end.date), timeZone)
+            ? toZonedTime(new Date(event.end.date), timeZone)
             : null;
 
           if (!eventStart || !eventEnd) {
@@ -148,6 +152,7 @@ async function getAvailableSlots(
 
       // Avançar para o próximo dia
       currentDate.setDate(currentDate.getDate() + 1);
+      currentDate = toZonedTime(currentDate, timeZone); // Atualiza o fuso horário para o próximo dia
     }
 
     return freeSlots;
