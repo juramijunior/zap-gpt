@@ -225,71 +225,50 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       }
 
       case "Marcar Consulta": {
-        const date = req.body.queryResult.parameters.data; // Captura o parâmetro 'data'
-        const time = req.body.queryResult.parameters.hora_consulta; // Captura o parâmetro 'hora_consulta'
-
-        if (!date || !time) {
-          responseText =
-            "Por favor, forneça uma data e horário para a consulta.";
-          break;
-        }
-
-        // Combine a data e hora em um único objeto Date
-        const selectedSlot = new Date(`${date}T${time}`);
-
-        if (isNaN(selectedSlot.getTime())) {
-          responseText =
-            "A data ou horário fornecido não é válido. Por favor, tente novamente.";
-          break;
-        }
-
-        // Verificar disponibilidade do horário
-        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID correto
-        const availableSlots = await getAvailableSlots(calendarId);
-
-        const formattedSlot = selectedSlot.toLocaleString("pt-BR", {
-          timeZone: "America/Sao_Paulo",
-        });
-
-        if (!availableSlots.includes(formattedSlot)) {
-          // Caso o horário escolhido não esteja disponível, retornar a lista de horários disponíveis
-          responseText = `O horário escolhido não está disponível. Aqui estão os horários disponíveis: \n${availableSlots
-            .map((slot, index) => `${index + 1}) ${slot}`)
-            .join(
-              "\n"
-            )}\nPor favor, escolha um número correspondente ao horário.`;
-          break;
-        }
-
-        // Criar evento no Google Calendar
-        const event = {
-          summary: "Consulta",
-          description: "Consulta médica agendada pelo sistema.",
-          start: {
-            dateTime: selectedSlot.toISOString(),
-            timeZone: "America/Sao_Paulo",
-          },
-          end: {
-            dateTime: new Date(
-              selectedSlot.getTime() + 60 * 60000
-            ).toISOString(), // Duração de 1 hora
-            timeZone: "America/Sao_Paulo",
-          },
-        };
-
         try {
-          await calendar.events.insert({
-            calendarId,
-            requestBody: event,
+          const calendarId = "jurami.junior@gmail.com"; // ID do calendário
+          const availableSlots = await getAvailableSlots(calendarId); // Obter horários disponíveis
+
+          // Extrair dias únicos disponíveis
+          const daysAvailable = Array.from(
+            new Set(
+              availableSlots.map(
+                (slot) => slot.split(",")[0] // Extrair apenas a parte da data (dd/MM/yyyy)
+              )
+            )
+          );
+
+          if (daysAvailable.length === 0) {
+            responseText =
+              "Não há dias disponíveis para agendamento. Por favor, tente novamente mais tarde.";
+            break;
+          }
+
+          // Criar lista interativa de dias
+          const options = daysAvailable
+            .map((day, index) => `${index + 1}) ${day}`)
+            .join("\n");
+
+          responseText = `Escolha um dos dias disponíveis para agendar a consulta:\n${options}\n\nResponda com o número correspondente ao dia que prefere.`;
+
+          // Salvar os dias disponíveis no contexto
+          const contextData = daysAvailable;
+          res.json({
+            fulfillmentText: responseText,
+            outputContexts: [
+              {
+                name: `${req.body.session}/contexts/days_available`,
+                lifespanCount: 5,
+                parameters: { daysAvailable: contextData },
+              },
+            ],
           });
-
-          responseText = `Consulta marcada com sucesso para ${formattedSlot}.`;
         } catch (error) {
-          console.error("Erro ao criar evento no Google Calendar:", error);
+          console.error("Erro ao buscar dias disponíveis:", error);
           responseText =
-            "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
+            "Desculpe, ocorreu um erro ao buscar os dias disponíveis.";
+          res.json({ fulfillmentText: responseText });
         }
-
         break;
       }
 
