@@ -68,125 +68,98 @@ async function listCalendars() {
   }
 }
 
-async function getAvailableSlots(
-  calendarId: string,
-  weeksToSearch = 2
-): Promise<string[]> {
-  const workingHoursStart = 9; // 9h
-  const workingHoursEnd = 18; // 18h
-  const timeIncrement = 60; // Intervalo em minutos
-  let startDate = new Date();
-  let endDate = new Date();
-  endDate.setDate(startDate.getDate() + weeksToSearch * 7);
-
-  try {
-    const response = await calendar.events.list({
-      calendarId,
-      timeMin: startDate.toISOString(),
-      timeMax: endDate.toISOString(),
-      singleEvents: true,
-      orderBy: "startTime",
-    });
-
-    const events = response.data.items || [];
-    const freeSlots: string[] = [];
-
-    const currentDate = new Date(startDate);
-
-    while (currentDate < endDate) {
-      // Reiniciar o horário para o início do expediente
-      currentDate.setHours(workingHoursStart, 0, 0, 0);
-
-      while (currentDate.getHours() < workingHoursEnd) {
-        const isFree = !events.some((event) => {
-          const eventStart = event.start?.dateTime
-            ? new Date(event.start.dateTime)
-            : event.start?.date
-            ? new Date(event.start.date)
-            : null;
-          const eventEnd = event.end?.dateTime
-            ? new Date(event.end.dateTime)
-            : event.end?.date
-            ? new Date(event.end.date)
-            : null;
-
-          if (!eventStart || !eventEnd) {
-            return false; // Ignora eventos inválidos
-          }
-
-          return currentDate >= eventStart && currentDate < eventEnd;
-        });
-
-        if (isFree) {
-          freeSlots.push(
-            new Date(currentDate).toLocaleString("pt-BR", {
-              timeZone: "America/Sao_Paulo",
-            })
-          );
-        }
-
-        currentDate.setMinutes(currentDate.getMinutes() + timeIncrement); // Incrementa o horário
-      }
-
-      // Avançar para o próximo dia
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    return freeSlots;
-  } catch (error) {
-    console.error("Erro ao buscar horários disponíveis:", error);
-    throw new Error("Erro ao buscar horários disponíveis");
-  }
-}
-
-// Função para lidar com Fulfillment do Dialogflow
-app.post("/fulfillment", async (req: Request, res: Response) => {
-  const intentName = req.body.queryResult.intent.displayName;
-
-  try {
-    let responseText = "Desculpe, não entendi sua solicitação.";
-
-    // Processar lógica personalizada com base na intenção
-    switch (intentName) {
-      case "Horários Disponíveis":
-        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
-        const availableSlots = await getAvailableSlots(calendarId);
-        responseText = `Os horários disponíveis são: ${availableSlots.join(
-          ", "
-        )}. Qual prefere?`;
-        break;
-
-      case "Agendamento de Consultas":
-        const date = req.body.queryResult.parameters.date;
-        responseText = `Consulta agendada para ${date}. Caso precise alterar, entre em contato.`;
-        break;
-
-      case "Cancelar Consulta":
-        responseText = "Sua consulta foi cancelada com sucesso.";
-        break;
-
-      case "Horários Disponíveis":
-        responseText =
-          "Os horários disponíveis são: 10:00, 13:00 e 15:30. Qual prefere?";
-        break;
-
-      default:
-        responseText = `Eu recebi sua solicitação na intenção "${intentName}", mas ainda não consigo tratá-la.`;
-    }
-
-    // Retorna a resposta ao Dialogflow
-    res.json({
-      fulfillmentText: responseText,
-    });
-  } catch (error) {
-    console.error("Erro no Fulfillment:", error);
-    res.status(500).send("Erro ao processar a intenção.");
-  }
-});
-
 // Rota para receber mensagens do Twilio e processar via Dialogflow
 app.post("/webhook", async (req, res) => {
   const incomingMessage = req.body.Body;
+  async function getAvailableSlots(
+    calendarId: string,
+    weeksToSearch = 2
+  ): Promise<string[]> {
+    const timeIncrement = 60; // Intervalo em minutos
+    let startDate = new Date();
+    let endDate = new Date();
+    endDate.setDate(startDate.getDate() + weeksToSearch * 7);
+
+    try {
+      const response = await calendar.events.list({
+        calendarId,
+        timeMin: startDate.toISOString(),
+        timeMax: endDate.toISOString(),
+        singleEvents: true,
+        orderBy: "startTime",
+      });
+
+      const events = response.data.items || [];
+      const freeSlots: string[] = [];
+
+      const currentDate = new Date(startDate);
+
+      while (currentDate < endDate) {
+        const dayOfWeek = currentDate.getDay(); // 0 (Domingo) a 6 (Sábado)
+
+        // Configurar horários específicos para terça e quarta-feira
+        let startHour = 0;
+        let endHour = 0;
+
+        if (dayOfWeek === 2) {
+          // Terça-feira: das 14h às 19h
+          startHour = 14;
+          endHour = 19;
+        } else if (dayOfWeek === 3) {
+          // Quarta-feira: das 8h às 13h
+          startHour = 8;
+          endHour = 13;
+        } else {
+          // Ignorar outros dias
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+        }
+
+        // Configurar horário inicial do dia
+        currentDate.setHours(startHour, 0, 0, 0);
+
+        while (currentDate.getHours() < endHour) {
+          const isFree = !events.some((event) => {
+            const eventStart = event.start?.dateTime
+              ? new Date(event.start.dateTime)
+              : event.start?.date
+              ? new Date(event.start.date)
+              : null;
+            const eventEnd = event.end?.dateTime
+              ? new Date(event.end.dateTime)
+              : event.end?.date
+              ? new Date(event.end.date)
+              : null;
+
+            if (!eventStart || !eventEnd) {
+              return false; // Ignora eventos inválidos
+            }
+
+            return currentDate >= eventStart && currentDate < eventEnd;
+          });
+
+          if (isFree) {
+            freeSlots.push(
+              new Date(currentDate).toLocaleString("pt-BR", {
+                timeZone: "America/Sao_Paulo",
+              })
+            );
+          }
+
+          currentDate.setMinutes(currentDate.getMinutes() + timeIncrement); // Incrementa o horário
+        }
+
+        // Avançar para o próximo dia
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      return freeSlots;
+    } catch (error) {
+      console.error("Erro ao buscar horários disponíveis:", error);
+      throw new Error("Erro ao buscar horários disponíveis");
+    }
+  }
+
   const fromNumber = req.body.From;
 
   try {
