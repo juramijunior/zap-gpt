@@ -182,36 +182,43 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       case "Selecionar Horário": {
         const slotIndex =
           parseInt(req.body.queryResult.parameters.slotNumber) - 1;
-        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
+        const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
+
+        if (slotIndex < 0 || slotIndex >= availableSlots.length) {
+          responseText =
+            "A escolha não é válida. Por favor, escolha um número da lista.";
+          break;
+        }
+
         const selectedSlot = availableSlots[slotIndex];
 
-        if (!selectedSlot) {
-          responseText =
-            "O horário selecionado não é válido. Por favor, escolha outro.";
-        } else {
-          // Criar evento no Google Calendar
-          const event = {
-            summary: "Consulta",
-            description: "Consulta médica agendada pelo sistema.",
-            start: {
-              dateTime: new Date(selectedSlot).toISOString(),
-              timeZone: "America/Sao_Paulo",
-            },
-            end: {
-              dateTime: new Date(
-                new Date(selectedSlot).getTime() + 60 * 60000
-              ).toISOString(), // Duração de 1 hora
-              timeZone: "America/Sao_Paulo",
-            },
-          };
+        const event = {
+          summary: "Consulta",
+          description: "Consulta médica agendada pelo sistema.",
+          start: {
+            dateTime: new Date(selectedSlot).toISOString(),
+            timeZone: "America/Sao_Paulo",
+          },
+          end: {
+            dateTime: new Date(
+              new Date(selectedSlot).getTime() + 60 * 60000
+            ).toISOString(),
+            timeZone: "America/Sao_Paulo",
+          },
+        };
 
+        try {
           await calendar.events.insert({
-            calendarId, // ID do calendário
-            requestBody: event, // Corpo do evento
+            calendarId,
+            requestBody: event,
           });
 
           responseText = `Consulta marcada com sucesso para ${selectedSlot}.`;
+        } catch (error) {
+          console.error("Erro ao criar evento no Google Calendar:", error);
+          responseText =
+            "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
         }
 
         break;
@@ -230,19 +237,27 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         // Combine a data e hora em um único objeto Date
         const selectedSlot = new Date(`${date}T${time}`);
 
-        // Verifique se o horário está disponível (opcional)
-        const calendarId = "jurami.junior@gmail.com";
+        if (isNaN(selectedSlot.getTime())) {
+          responseText =
+            "A data ou horário fornecido não é válido. Por favor, tente novamente.";
+          break;
+        }
+
+        // Verificar disponibilidade do horário
+        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID correto
         const availableSlots = await getAvailableSlots(calendarId);
 
-        if (
-          !availableSlots.includes(
-            selectedSlot.toLocaleString("pt-BR", {
-              timeZone: "America/Sao_Paulo",
-            })
-          )
-        ) {
-          responseText =
-            "O horário escolhido não está disponível. Por favor, escolha outro horário.";
+        const formattedSlot = selectedSlot.toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+        });
+
+        if (!availableSlots.includes(formattedSlot)) {
+          // Caso o horário escolhido não esteja disponível, retornar a lista de horários disponíveis
+          responseText = `O horário escolhido não está disponível. Aqui estão os horários disponíveis: \n${availableSlots
+            .map((slot, index) => `${index + 1}) ${slot}`)
+            .join(
+              "\n"
+            )}\nPor favor, escolha um número correspondente ao horário.`;
           break;
         }
 
@@ -262,15 +277,19 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           },
         };
 
-        await calendar.events.insert({
-          calendarId,
-          requestBody: event,
-        });
+        try {
+          await calendar.events.insert({
+            calendarId,
+            requestBody: event,
+          });
 
-        responseText = `Consulta marcada com sucesso para ${selectedSlot.toLocaleString(
-          "pt-BR",
-          { timeZone: "America/Sao_Paulo" }
-        )}.`;
+          responseText = `Consulta marcada com sucesso para ${formattedSlot}.`;
+        } catch (error) {
+          console.error("Erro ao criar evento no Google Calendar:", error);
+          responseText =
+            "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
+        }
+
         break;
       }
 
