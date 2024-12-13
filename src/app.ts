@@ -325,46 +325,50 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   }
 });
 
+// Rota para receber mensagens do Twilio e processar via Dialogflow
 app.post("/webhook", async (req, res) => {
-  const incomingMessage = req.body.Body || ""; // Mensagem enviada pelo usuário
-  const fromNumber = req.body.From || ""; // Número do remetente
-  const interactiveResponse = req.body.Interactive; // Resposta interativa, se existir
-
   try {
+    // Verificar se as propriedades essenciais existem
+    if (!req.body || !req.body.From) {
+      console.error("Webhook recebido sem informações essenciais:", req.body);
+      res.status(400).send("Dados insuficientes no webhook.");
+      return;
+    }
+
+    const fromNumber = req.body.From;
+    const incomingMessage = req.body.Body || ""; // Mensagem normal
+    const interactiveResponse = req.body.Interactive || {}; // Mensagem interativa, se existir
+
+    // Autenticação com o Google
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
     const sessionId = uuid.v4();
 
-    // Verificar se é uma resposta interativa
-    if (interactiveResponse && interactiveResponse.list_reply) {
+    // 1. Processar Resposta Interativa
+    if (interactiveResponse.list_reply) {
       const selectedOptionId = interactiveResponse.list_reply.id;
-      console.log("Opção selecionada pelo usuário:", selectedOptionId);
 
       if (selectedOptionId.startsWith("slot_")) {
-        // Capturar o índice do slot selecionado
         const slotIndex = parseInt(selectedOptionId.split("_")[1]) - 1;
 
-        // Buscar slot correspondente
+        // Obter slots disponíveis
         const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
-        const selectedSlot = availableSlots[slotIndex];
 
-        if (!selectedSlot) {
+        if (!availableSlots[slotIndex]) {
           console.error("Slot selecionado não encontrado:", selectedOptionId);
-
-          if (fromNumber) {
-            await twilioClient.messages.create({
-              from: "whatsapp:+14155238886",
-              to: fromNumber,
-              body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
-            });
-          }
-
-          res.status(400).send("Slot não encontrado.");
-          return; // Interrompe a execução para evitar múltiplas respostas
+          await twilioClient.messages.create({
+            from: "whatsapp:+14155238886",
+            to: fromNumber,
+            body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
+          });
+          res.status(200).send("Slot inválido processado.");
+          return;
         }
 
-        const [day, time] = selectedSlot.split(",").map((s) => s.trim());
+        const [day, time] = availableSlots[slotIndex]
+          .split(",")
+          .map((s) => s.trim());
         const selectedDateTime = new Date(`${day}T${time}`);
 
         // Criar evento no Google Calendar
@@ -388,21 +392,18 @@ app.post("/webhook", async (req, res) => {
           requestBody: event,
         });
 
-        // Confirmar o agendamento ao usuário
-        if (fromNumber) {
-          await twilioClient.messages.create({
-            from: "whatsapp:+14155238886",
-            to: fromNumber,
-            body: `Consulta marcada com sucesso para ${day} às ${time}.`,
-          });
-        }
+        await twilioClient.messages.create({
+          from: "whatsapp:+14155238886",
+          to: fromNumber,
+          body: `Consulta marcada com sucesso para ${day} às ${time}.`,
+        });
 
         res.status(200).send("Consulta marcada com sucesso.");
-        return; // Interrompe a execução
+        return;
       }
     }
 
-    // Processar mensagens normais
+    // 2. Processar Mensagem Normal
     const dialogflowResponse = await axios.post(
       `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
       {
@@ -422,13 +423,11 @@ app.post("/webhook", async (req, res) => {
 
     const responseMessage = dialogflowResponse.data.queryResult.fulfillmentText;
 
-    if (fromNumber) {
-      await twilioClient.messages.create({
-        from: "whatsapp:+14155238886",
-        to: fromNumber,
-        body: responseMessage,
-      });
-    }
+    await twilioClient.messages.create({
+      from: "whatsapp:+14155238886",
+      to: fromNumber,
+      body: responseMessage,
+    });
 
     res.status(200).send("Mensagem processada com sucesso.");
   } catch (error) {
