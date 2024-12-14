@@ -134,6 +134,11 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       case "Selecionar Horário": {
         const slotNumber = req.body.queryResult.parameters?.number;
 
+        console.log(
+          "Parâmetros recebidos no webhook:",
+          req.body.queryResult.parameters
+        );
+
         if (!slotNumber || isNaN(parseInt(slotNumber))) {
           res.json({
             fulfillmentText:
@@ -143,19 +148,12 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         }
 
         const slotIndex = parseInt(slotNumber) - 1;
-        // Aqui você pode adicionar mais lógica para trabalhar com o índice
         const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
 
-        if (parseInt(slotNumber) === 0) {
-          responseText =
-            "Você escolheu cadastrar uma consulta manualmente. Por favor, informe o dia e horário desejado.";
-          break;
-        }
-
         if (slotIndex < 0 || slotIndex >= availableSlots.length) {
           responseText =
-            "A escolha não é válida. Por favor, escolha um número da lista.";
+            "O número escolhido está fora da lista de horários disponíveis. Por favor, tente novamente.";
           break;
         }
 
@@ -224,6 +222,80 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
     console.error("Erro no Fulfillment:", error);
     if (!res.headersSent) {
       res.status(500).send("Erro ao processar a intenção.");
+    }
+  }
+});
+
+app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.body || (!req.body.From && !req.body.Body)) {
+      console.error("Requisição inválida recebida:", req.body);
+      if (!res.headersSent) {
+        res.status(400).send("Requisição inválida.");
+      }
+      return;
+    }
+
+    const fromNumber = req.body.From; // Número do usuário (WhatsApp)
+    const incomingMessage = req.body.Body || ""; // Mensagem recebida do usuário
+
+    const client = await auth.getClient();
+    const accessToken = await client.getAccessToken();
+
+    const sessionId = uuid.v4(); // Gera um ID único para a sessão do Dialogflow
+
+    if (fromNumber) {
+      sessionUserMap[sessionId] = fromNumber; // Mapeia a sessão para o número do usuário
+    }
+
+    // Envia a mensagem para o Dialogflow
+    const dialogflowResponse = await axios.post(
+      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
+      {
+        queryInput: {
+          text: {
+            text: incomingMessage, // Mensagem recebida
+            languageCode: "pt-BR", // Código de idioma
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken.token}`,
+        },
+      }
+    );
+
+    // Captura a resposta do Dialogflow
+    const responseMessage =
+      dialogflowResponse.data.queryResult.fulfillmentText ||
+      "Desculpe, não entendi. Poderia repetir?";
+
+    // Envia a resposta do Dialogflow de volta ao usuário via Twilio
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+    const data = {
+      To: fromNumber, // Número do usuário
+      From: `whatsapp:${twilioFromNumber}`, // Número do Twilio
+      Body: responseMessage, // Resposta a ser enviada
+    };
+
+    await axios.post(url, qs.stringify(data), {
+      auth: {
+        username: accountSid || "",
+        password: authToken || "",
+      },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    if (!res.headersSent) {
+      res.status(200).send("Mensagem processada com sucesso.");
+    }
+  } catch (error) {
+    console.error("Erro ao processar a mensagem:", error);
+    if (!res.headersSent) {
+      res.status(500).send("Erro ao processar a mensagem.");
     }
   }
 });
