@@ -18,7 +18,7 @@ if (!credentialsJson) {
 }
 const parsedCredentials = JSON.parse(credentialsJson);
 
-// Configuração do Twilionpm install date-fns date-fns-tz
+// Configuração do Twilio
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioClient = new Twilio(accountSid, authToken);
@@ -39,38 +39,6 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
-
-async function addCalendarToServiceAccount(calendarId: string) {
-  try {
-    const response = await calendar.calendarList.insert({
-      requestBody: {
-        id: calendarId, // O ID do calendário compartilhado
-      },
-    });
-    console.log("Calendário adicionado à conta de serviço:", response.data);
-  } catch (error) {
-    const err = error as Error;
-    console.error("Erro ao adicionar calendários:", err.message);
-  }
-}
-
-async function listCalendars() {
-  try {
-    const response = await calendar.calendarList.list();
-    const calendars = response.data.items || [];
-
-    if (calendars.length === 0) {
-      console.log("Nenhum calendário disponível para a conta de serviço.");
-    } else {
-      calendars.forEach((cal) => {
-        console.log(`- ${cal.summary} (ID: ${cal.id})`);
-      });
-    }
-  } catch (error) {
-    const err = error as Error;
-    console.error("Erro ao listar calendários:", err.message);
-  }
-}
 
 async function getAvailableSlots(
   calendarId: string,
@@ -94,12 +62,11 @@ async function getAvailableSlots(
     const events = response.data.items || [];
     const freeSlots: string[] = [];
 
-    let currentDate = toZonedTime(startDate, timeZone); // Converte para o fuso horário correto
+    let currentDate = toZonedTime(startDate, timeZone); // Converte para o fuso horário
 
     while (currentDate < endDate) {
       const dayOfWeek = currentDate.getDay(); // 0 (Domingo) a 6 (Sábado)
 
-      // Configurar horários específicos para terça e quarta-feira
       let startHour = 0;
       let endHour = 0;
 
@@ -112,13 +79,12 @@ async function getAvailableSlots(
         startHour = 8;
         endHour = 13;
       } else {
-        // Ignorar outros dias
         currentDate.setDate(currentDate.getDate() + 1);
-        currentDate = toZonedTime(currentDate, timeZone); // Atualiza o fuso horário para o próximo dia
+        currentDate = toZonedTime(currentDate, timeZone);
         continue;
       }
 
-      // Configurar horário inicial do dia
+      // Define o horário inicial do dia
       currentDate.setHours(startHour, 0, 0, 0);
 
       while (currentDate.getHours() < endHour) {
@@ -135,24 +101,20 @@ async function getAvailableSlots(
             : null;
 
           if (!eventStart || !eventEnd) {
-            return false; // Ignora eventos inválidos
+            return false;
           }
-
           return currentDate >= eventStart && currentDate < eventEnd;
         });
 
         if (isFree) {
-          freeSlots.push(
-            format(currentDate, "dd/MM/yyyy, HH:mm:ss", { timeZone })
-          );
+          freeSlots.push(format(currentDate, "dd/MM/yyyy HH:mm", { timeZone }));
         }
 
-        currentDate.setMinutes(currentDate.getMinutes() + timeIncrement); // Incrementa o horário
+        currentDate.setMinutes(currentDate.getMinutes() + timeIncrement);
       }
 
-      // Avançar para o próximo dia
       currentDate.setDate(currentDate.getDate() + 1);
-      currentDate = toZonedTime(currentDate, timeZone); // Atualiza o fuso horário para o próximo dia
+      currentDate = toZonedTime(currentDate, timeZone);
     }
 
     return freeSlots;
@@ -162,21 +124,30 @@ async function getAvailableSlots(
   }
 }
 
-// Função para lidar com Fulfillment do Dialogflow
 app.post("/fulfillment", async (req: Request, res: Response) => {
   const intentName = req.body.queryResult.intent.displayName;
 
   try {
     let responseText = "Desculpe, não entendi sua solicitação.";
 
-    // Processar lógica personalizada com base na intenção
     switch (intentName) {
       case "Horários Disponíveis":
-        const calendarId = "jurami.junior@gmail.com"; // Substitua pelo ID do calendário da clínica, se necessário
-        const availableSlots = await getAvailableSlots(calendarId);
-        responseText = `Os horários disponíveis são: ${availableSlots.join(
-          ", "
-        )}. Qual prefere?`;
+        try {
+          const calendarId = "jurami.junior@gmail.com";
+          const availableSlots = await getAvailableSlots(calendarId);
+          if (availableSlots.length === 0) {
+            responseText =
+              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+          } else {
+            responseText = `Os horários disponíveis são: \n${availableSlots
+              .map((s, i) => `${i + 1}. ${s}`)
+              .join("\n")}\nQual prefere? Informe o número da opção.`;
+          }
+        } catch (error) {
+          console.error("Erro ao obter horários:", error);
+          responseText =
+            "Desculpe, ocorreu um erro ao obter os horários disponíveis. Tente novamente mais tarde.";
+        }
         break;
 
       case "Selecionar Horário": {
@@ -192,17 +163,18 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         }
 
         const selectedSlot = availableSlots[slotIndex];
+        const selectedDateTime = new Date(selectedSlot.replace(" ", "T"));
 
         const event = {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
           start: {
-            dateTime: new Date(selectedSlot).toISOString(),
+            dateTime: selectedDateTime.toISOString(),
             timeZone: "America/Sao_Paulo",
           },
           end: {
             dateTime: new Date(
-              new Date(selectedSlot).getTime() + 60 * 60000
+              selectedDateTime.getTime() + 60 * 60000
             ).toISOString(),
             timeZone: "America/Sao_Paulo",
           },
@@ -213,32 +185,40 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             calendarId,
             requestBody: event,
           });
-
           responseText = `Consulta marcada com sucesso para ${selectedSlot}.`;
         } catch (error) {
           console.error("Erro ao criar evento no Google Calendar:", error);
           responseText =
             "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
         }
-
         break;
       }
 
       case "Marcar Consulta": {
+        // Obter slots e enviar lista interativa
         try {
-          const calendarId = "jurami.junior@gmail.com"; // ID do calendário
+          const calendarId = "jurami.junior@gmail.com";
           const availableSlots = await getAvailableSlots(calendarId);
 
           if (availableSlots.length === 0) {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-            res.json({ fulfillmentText: responseText });
-            return;
+            break;
           }
 
-          // Construir lista de dias e horários para mensagem interativa
+          const userNumber =
+            req.body.originalDetectIntentRequest?.payload?.data?.from;
+          const twilioFromNumber = process.env.TWILIO_PHONE_NUMBER;
+
+          if (!userNumber || !twilioFromNumber) {
+            console.error("Número de usuário ou Twilio não definido.");
+            responseText =
+              "Não foi possível enviar a lista de horários disponíveis. Por favor, tente novamente mais tarde.";
+            break;
+          }
+
           const slotsAvailable = availableSlots.map((slot, index) => {
-            const [day, time] = slot.split(",").map((s) => s.trim());
+            const [day, time] = slot.split(" ");
             return {
               id: `slot_${index + 1}`,
               title: `${day} - ${time}`,
@@ -246,10 +226,9 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             };
           });
 
-          // Estrutura da mensagem interativa
           const message = {
-            to: `whatsapp:${req.body.originalDetectIntentRequest.payload.data.from}`, // Número do usuário
-            from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`, // Seu número Twilio
+            to: `whatsapp:${userNumber}`,
+            from: `whatsapp:${twilioFromNumber}`,
             interactive: {
               type: "list",
               header: {
@@ -274,87 +253,73 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             },
           };
 
-          // Enviar mensagem interativa usando Twilio
-          const twilioClient = require("twilio")(
-            process.env.TWILIO_ACCOUNT_SID,
-            process.env.TWILIO_AUTH_TOKEN
-          );
-
           await twilioClient.messages.create(message);
 
-          // Envia resposta ao Dialogflow informando o usuário que a lista foi enviada
-          res.json({
-            fulfillmentText:
-              "Enviei uma lista de horários disponíveis no WhatsApp. Por favor, escolha clicando em uma das opções.",
-          });
+          // Apenas após criar a mensagem, retornamos a resposta
+          responseText =
+            "Enviei uma lista de horários disponíveis no WhatsApp. Por favor, escolha clicando em uma das opções.";
         } catch (error) {
           console.error("Erro ao enviar mensagem interativa:", error);
-          res.json({
-            fulfillmentText:
-              "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.",
-          });
+          responseText =
+            "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.";
         }
         break;
       }
 
-      case "Agendamento de Consultas":
+      case "Agendamento de Consultas": {
         const date = req.body.queryResult.parameters.date;
         responseText = `Consulta agendada para ${date}. Caso precise alterar, entre em contato.`;
         break;
+      }
 
       case "Cancelar Consulta":
         responseText = "Sua consulta foi cancelada com sucesso.";
         break;
 
-      case "Horários Disponíveis":
-        responseText =
-          "Os horários disponíveis são: 10:00, 13:00 e 15:30. Qual prefere?";
-        break;
-
       default:
-        responseText = `Eu recebi sua solicitação na intenção "${intentName}", mas ainda não consigo tratá-la.`;
+        responseText = `Desculpe, não entendi sua solicitação. Poderia reformular?`;
     }
 
     // Retorna a resposta ao Dialogflow
-    res.json({
-      fulfillmentText: responseText,
-    });
+    if (!res.headersSent) {
+      res.json({
+        fulfillmentText: responseText,
+      });
+    }
   } catch (error) {
     console.error("Erro no Fulfillment:", error);
-    res.status(500).send("Erro ao processar a intenção.");
+    if (!res.headersSent) {
+      res.status(500).send("Erro ao processar a intenção.");
+    }
   }
 });
 
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
-    // Verificar se req.body e propriedades básicas existem
-    if (
-      !req.body ||
-      !req.body.From ||
-      (!req.body.Body && !req.body.Interactive)
-    ) {
+    // Verificação da requisição do Twilio
+    if (!req.body || (!req.body.From && !req.body.Interactive)) {
       console.error("Requisição inválida recebida:", req.body);
-      res.status(400).send("Requisição inválida.");
+      if (!res.headersSent) {
+        res.status(400).send("Requisição inválida.");
+      }
       return;
     }
 
     const fromNumber = req.body.From;
-    const incomingMessage = req.body.Body || ""; // Mensagem recebida do Twilio
+    const incomingMessage = req.body.Body || "";
     const interactiveResponse = req.body.Interactive || {};
 
-    // Inicializar cliente do Google Auth
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
     const sessionId = uuid.v4();
 
-    // 1. Processar Mensagens Interativas
+    // Processar resposta interativa
     if (interactiveResponse.list_reply) {
       const selectedOptionId = interactiveResponse.list_reply.id;
 
       if (selectedOptionId.startsWith("slot_")) {
         const slotIndex = parseInt(selectedOptionId.split("_")[1]) - 1;
 
-        // Obter slots disponíveis
         const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
 
@@ -362,21 +327,20 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           console.error("Slot selecionado não encontrado:", selectedOptionId);
 
           await twilioClient.messages.create({
-            from: "whatsapp:+14155238886",
+            from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
             to: fromNumber,
             body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
           });
 
-          res.status(200).send("Slot inválido processado.");
+          if (!res.headersSent) {
+            res.status(200).send("Slot inválido processado.");
+          }
           return;
         }
 
-        const [day, time] = availableSlots[slotIndex]
-          .split(",")
-          .map((s) => s.trim());
+        const [day, time] = availableSlots[slotIndex].split(" ");
         const selectedDateTime = new Date(`${day}T${time}`);
 
-        // Criar evento no Google Calendar
         const event = {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
@@ -398,17 +362,19 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         });
 
         await twilioClient.messages.create({
-          from: "whatsapp:+14155238886",
+          from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
           to: fromNumber,
           body: `Consulta marcada com sucesso para ${day} às ${time}.`,
         });
 
-        res.status(200).send("Consulta marcada com sucesso.");
+        if (!res.headersSent) {
+          res.status(200).send("Consulta marcada com sucesso.");
+        }
         return;
       }
     }
 
-    // 2. Processar Mensagens Normais
+    // Processar mensagens normais
     if (incomingMessage) {
       const dialogflowResponse = await axios.post(
         `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
@@ -428,24 +394,27 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       );
 
       const responseMessage =
-        dialogflowResponse.data.queryResult.fulfillmentText;
+        dialogflowResponse.data.queryResult.fulfillmentText ||
+        "Desculpe, não entendi. Poderia repetir?";
 
       await twilioClient.messages.create({
-        from: "whatsapp:+14155238886",
+        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
         to: fromNumber,
         body: responseMessage,
       });
 
-      res.status(200).send("Mensagem processada com sucesso.");
+      if (!res.headersSent) {
+        res.status(200).send("Mensagem processada com sucesso.");
+      }
       return;
     }
 
-    // Caso nenhuma das condições acima seja atendida
-    res.status(400).send("Requisição não pôde ser processada.");
+    // Caso nada seja processado
+    if (!res.headersSent) {
+      res.status(400).send("Requisição não pôde ser processada.");
+    }
   } catch (error) {
     console.error("Erro ao processar a mensagem:", error);
-
-    // Evitar múltiplas respostas
     if (!res.headersSent) {
       res.status(500).send("Erro ao processar a mensagem.");
     }
@@ -456,8 +425,4 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
-  // Substitua pelo ID do calendário compartilhado
-  // const calendarId = "jurami.junior@gmail.com";
-  //addCalendarToServiceAccount(calendarId);
-  // listCalendars().catch(console.error);
 });
