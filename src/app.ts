@@ -199,6 +199,8 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
+      // Caso "Marcar Consulta"
+
       case "Marcar Consulta": {
         const fromNumber = sessionUserMap[sessionId];
         if (!fromNumber || !twilioFromNumber) {
@@ -217,6 +219,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             break;
           }
 
+          // Transformando slotsAvailable em parâmetros:
           const slotsAvailable = availableSlots.map((slot, index) => {
             const [day, time] = slot.split(" ");
             return {
@@ -226,30 +229,36 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             };
           });
 
-          // Agora iremos enviar a requisição diretamente à API do Twilio
           const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
-          const data = {
+
+          // Construção dos parâmetros no formato exigido
+          // Parâmetros básicos
+          const formParams: any = {
             To: `whatsapp:${fromNumber}`,
             From: `whatsapp:${twilioFromNumber}`,
             Type: "interactive",
-            Interactive: JSON.stringify({
-              type: "list",
-              body: {
-                text: "Selecione um dos horários disponíveis abaixo:",
-              },
-              action: {
-                button: "Ver opções",
-                sections: [
-                  {
-                    title: "Horários disponíveis",
-                    rows: slotsAvailable,
-                  },
-                ],
-              },
-            }),
+            "Interactive[Type]": "list",
+            "Interactive[Body][Text]":
+              "Selecione um dos horários disponíveis abaixo:",
+            "Interactive[Action][Button]": "Ver opções",
           };
 
-          await axios.post(url, qs.stringify(data), {
+          // Adicionar as seções e rows dinamicamente
+          // Supondo apenas uma seção:
+          formParams["Interactive[Action][Sections][0][Title]"] =
+            "Horários disponíveis";
+
+          slotsAvailable.forEach((slot, i) => {
+            formParams[`Interactive[Action][Sections][0][Rows][${i}][Id]`] =
+              slot.id;
+            formParams[`Interactive[Action][Sections][0][Rows][${i}][Title]`] =
+              slot.title;
+            formParams[
+              `Interactive[Action][Sections][0][Rows][${i}][Description]`
+            ] = slot.description;
+          });
+
+          await axios.post(url, qs.stringify(formParams), {
             auth: {
               username: accountSid || "",
               password: authToken || "",
