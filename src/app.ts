@@ -177,10 +177,14 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const [day, month, year] = datePart.split("/");
         const formattedDateTime = `${year}-${month}-${day}T${timePart}:00`;
 
-        // Use a função `toZonedTime` para ajustar ao fuso horário correto
+        // Use toZonedTime para ajustar corretamente o horário ao fuso
         const timeZone = "America/Sao_Paulo";
-        const selectedDateTime = toZonedTime(
+        const startDateTime = toZonedTime(
           new Date(formattedDateTime),
+          timeZone
+        );
+        const endDateTime = toZonedTime(
+          new Date(startDateTime.getTime() + 60 * 60000), // Adiciona 60 minutos
           timeZone
         );
 
@@ -188,15 +192,12 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
           start: {
-            dateTime: selectedDateTime.toISOString(), // Usa o horário correto ajustado ao fuso
-            timeZone, // Define explicitamente o fuso horário
+            dateTime: startDateTime.toISOString(),
+            timeZone,
           },
           end: {
-            dateTime: toZonedTime(
-              new Date(selectedDateTime.getTime() + 60 * 60000),
-              timeZone
-            ).toISOString(), // Adiciona 60 minutos ao horário inicial
-            timeZone, // Define explicitamente o fuso horário
+            dateTime: endDateTime.toISOString(),
+            timeZone,
           },
         };
 
