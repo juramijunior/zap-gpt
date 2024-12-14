@@ -172,21 +172,18 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const selectedSlot = availableSlots[slotIndex];
         console.log("Valor de selectedSlot:", selectedSlot);
 
-        // Converta o formato "DD/MM/YYYY HH:mm" para "YYYY-MM-DDTHH:mm:ss"
+        // Converta o formato "DD/MM/YYYY HH:mm" para um objeto Date ajustado para o fuso horário
+        const timeZone = "America/Sao_Paulo";
         const [datePart, timePart] = selectedSlot.split(" ");
         const [day, month, year] = datePart.split("/");
-        const formattedDateTime = `${year}-${month}-${day}T${timePart}:00`;
-
-        // Use toZonedTime para ajustar corretamente o horário ao fuso
-        const timeZone = "America/Sao_Paulo";
-        const startDateTime = toZonedTime(
-          new Date(formattedDateTime),
+        const formattedDateTime = new Date(
+          `${year}-${month}-${day}T${timePart}:00`
+        ); // Formata como ISO 8601
+        const startDateTime = dateFnsTz.toZonedTime(
+          formattedDateTime,
           timeZone
-        );
-        const endDateTime = toZonedTime(
-          new Date(startDateTime.getTime() + 60 * 60000), // Adiciona 60 minutos
-          timeZone
-        );
+        ); // Ajusta para o fuso horário
+        const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // Adiciona 60 minutos (1 hora)
 
         const event = {
           summary: "Consulta",
