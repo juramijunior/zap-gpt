@@ -339,7 +339,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     }
 
     const fromNumber = req.body.From;
-    const incomingMessage = req.body.Body || "";
+    const incomingMessage = req.body.Body || ""; // Mensagem recebida do Twilio
     const interactiveResponse = req.body.Interactive || {};
 
     // Inicializar cliente do Google Auth
@@ -347,7 +347,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     const accessToken = await client.getAccessToken();
     const sessionId = uuid.v4();
 
-    // Processar Mensagens Interativas
+    // 1. Processar Mensagens Interativas
     if (interactiveResponse.list_reply) {
       const selectedOptionId = interactiveResponse.list_reply.id;
 
@@ -408,7 +408,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Processar Mensagens Normais
+    // 2. Processar Mensagens Normais
     if (incomingMessage) {
       const dialogflowResponse = await axios.post(
         `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
