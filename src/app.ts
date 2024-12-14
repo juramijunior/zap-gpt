@@ -2,15 +2,16 @@ import "dotenv/config";
 import express, { Request, Response } from "express";
 import bodyParser from "body-parser";
 import axios from "axios";
-import { Twilio } from "twilio";
 import { GoogleAuth } from "google-auth-library";
 import { google } from "googleapis";
 import * as uuid from "uuid";
 import * as dateFnsTz from "date-fns-tz";
+import qs from "qs"; // Para facilitar a formatação x-www-form-urlencoded
 
 const toZonedTime = dateFnsTz.toZonedTime;
 const format = dateFnsTz.format;
 
+// Variáveis de ambiente
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 if (!credentialsJson) {
   throw new Error("As credenciais do Google não estão definidas.");
@@ -19,7 +20,6 @@ const parsedCredentials = JSON.parse(credentialsJson);
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
-const twilioClient = new Twilio(accountSid, authToken);
 const twilioFromNumber = process.env.TWILIO_PHONE_NUMBER;
 if (!twilioFromNumber) {
   console.error(
@@ -44,7 +44,6 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
-// Armazenamento em memória: { [sessionId: string]: string (fromNumber) }
 const sessionUserMap: { [key: string]: string } = {};
 
 async function getAvailableSlots(
@@ -78,11 +77,9 @@ async function getAvailableSlots(
       let endHour = 0;
 
       if (dayOfWeek === 2) {
-        // Terça-feira: das 14h às 19h
         startHour = 14;
         endHour = 19;
       } else if (dayOfWeek === 3) {
-        // Quarta-feira: das 8h às 13h
         startHour = 8;
         endHour = 13;
       } else {
@@ -132,8 +129,6 @@ async function getAvailableSlots(
 
 app.post("/fulfillment", async (req: Request, res: Response) => {
   const intentName = req.body.queryResult.intent.displayName;
-
-  // Extrair sessionId do campo session do Dialogflow
   const sessionPath: string = req.body.session || "";
   const sessionId = sessionPath.split("/").pop() || "";
 
@@ -205,7 +200,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       }
 
       case "Marcar Consulta": {
-        // Aqui vamos usar o número armazenado no sessionUserMap
         const fromNumber = sessionUserMap[sessionId];
         if (!fromNumber || !twilioFromNumber) {
           console.error("Número de usuário ou Twilio não definido.");
@@ -232,21 +226,16 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             };
           });
 
-          const message = {
-            to: `whatsapp:${fromNumber}`,
-            from: `whatsapp:${twilioFromNumber}`,
-            type: "interactive",
-            interactive: {
+          // Agora iremos enviar a requisição diretamente à API do Twilio
+          const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+          const data = {
+            To: `whatsapp:${fromNumber}`,
+            From: `whatsapp:${twilioFromNumber}`,
+            Type: "interactive",
+            Interactive: JSON.stringify({
               type: "list",
-              header: {
-                type: "text",
-                text: "Escolha um dia e horário",
-              },
               body: {
                 text: "Selecione um dos horários disponíveis abaixo:",
-              },
-              footer: {
-                text: "Clique em uma opção para confirmar o agendamento.",
               },
               action: {
                 button: "Ver opções",
@@ -257,10 +246,18 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
                   },
                 ],
               },
-            },
+            }),
           };
 
-          await twilioClient.messages.create(message);
+          await axios.post(url, qs.stringify(data), {
+            auth: {
+              username: accountSid || "",
+              password: authToken || "",
+            },
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+          });
 
           responseText =
             "Enviei uma lista de horários disponíveis no WhatsApp. Por favor, escolha clicando em uma das opções.";
@@ -316,15 +313,12 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
 
-    // Gerar um sessionId único para cada mensagem do usuário
     const sessionId = uuid.v4();
 
-    // Armazena o número do usuário na sessão
     if (fromNumber) {
       sessionUserMap[sessionId] = fromNumber;
     }
 
-    // Processar resposta interativa
     if (interactiveResponse.list_reply) {
       const selectedOptionId = interactiveResponse.list_reply.id;
 
@@ -336,11 +330,21 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
         if (!availableSlots[slotIndex]) {
           console.error("Slot selecionado não encontrado:", selectedOptionId);
+          const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+          const data = {
+            To: fromNumber,
+            From: `whatsapp:${twilioFromNumber}`,
+            Body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
+          };
 
-          await twilioClient.messages.create({
-            from: `whatsapp:${twilioFromNumber}`,
-            to: fromNumber,
-            body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
+          await axios.post(url, qs.stringify(data), {
+            auth: {
+              username: accountSid || "",
+              password: authToken || "",
+            },
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
           });
 
           if (!res.headersSent) {
@@ -372,10 +376,21 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           requestBody: event,
         });
 
-        await twilioClient.messages.create({
-          from: `whatsapp:${twilioFromNumber}`,
-          to: fromNumber,
-          body: `Consulta marcada com sucesso para ${day} às ${time}.`,
+        const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+        const data = {
+          To: fromNumber,
+          From: `whatsapp:${twilioFromNumber}`,
+          Body: `Consulta marcada com sucesso para ${day} às ${time}.`,
+        };
+
+        await axios.post(url, qs.stringify(data), {
+          auth: {
+            username: accountSid || "",
+            password: authToken || "",
+          },
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
         });
 
         if (!res.headersSent) {
@@ -385,7 +400,6 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Caso seja uma mensagem normal, enviar ao Dialogflow
     if (incomingMessage) {
       const dialogflowResponse = await axios.post(
         `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
@@ -408,10 +422,21 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         dialogflowResponse.data.queryResult.fulfillmentText ||
         "Desculpe, não entendi. Poderia repetir?";
 
-      await twilioClient.messages.create({
-        from: `whatsapp:${twilioFromNumber}`,
-        to: fromNumber,
-        body: responseMessage,
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+      const data = {
+        To: fromNumber,
+        From: `whatsapp:${twilioFromNumber}`,
+        Body: responseMessage,
+      };
+
+      await axios.post(url, qs.stringify(data), {
+        auth: {
+          username: accountSid || "",
+          password: authToken || "",
+        },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
       });
 
       if (!res.headersSent) {
@@ -420,7 +445,6 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Caso nada seja processado
     if (!res.headersSent) {
       res.status(400).send("Requisição não pôde ser processada.");
     }
