@@ -22,6 +22,12 @@ const parsedCredentials = JSON.parse(credentialsJson);
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioClient = new Twilio(accountSid, authToken);
+const twilioFromNumber = process.env.TWILIO_PHONE_NUMBER;
+if (!twilioFromNumber) {
+  console.error(
+    "A variável TWILIO_PHONE_NUMBER não está definida. Defina esta variável de ambiente."
+  );
+}
 
 const auth = new GoogleAuth({
   credentials: parsedCredentials,
@@ -40,13 +46,16 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
+// Armazenamento em memória: { [sessionId: string]: string (fromNumber) }
+const sessionUserMap: { [key: string]: string } = {};
+
 async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
 ): Promise<string[]> {
   const timeIncrement = 60; // Intervalo em minutos
-  const timeZone = "America/Sao_Paulo"; // Defina o fuso horário correto
-  let startDate = new Date(); // Data inicial
+  const timeZone = "America/Sao_Paulo";
+  let startDate = new Date();
   let endDate = new Date();
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
@@ -62,10 +71,10 @@ async function getAvailableSlots(
     const events = response.data.items || [];
     const freeSlots: string[] = [];
 
-    let currentDate = toZonedTime(startDate, timeZone); // Converte para o fuso horário
+    let currentDate = toZonedTime(startDate, timeZone);
 
     while (currentDate < endDate) {
-      const dayOfWeek = currentDate.getDay(); // 0 (Domingo) a 6 (Sábado)
+      const dayOfWeek = currentDate.getDay();
 
       let startHour = 0;
       let endHour = 0;
@@ -84,7 +93,6 @@ async function getAvailableSlots(
         continue;
       }
 
-      // Define o horário inicial do dia
       currentDate.setHours(startHour, 0, 0, 0);
 
       while (currentDate.getHours() < endHour) {
@@ -127,9 +135,13 @@ async function getAvailableSlots(
 app.post("/fulfillment", async (req: Request, res: Response) => {
   const intentName = req.body.queryResult.intent.displayName;
 
-  try {
-    let responseText = "Desculpe, não entendi sua solicitação.";
+  // Extrair sessionId do campo session do Dialogflow
+  const sessionPath: string = req.body.session || "";
+  const sessionId = sessionPath.split("/").pop() || "";
 
+  let responseText = "Desculpe, não entendi sua solicitação.";
+
+  try {
     switch (intentName) {
       case "Horários Disponíveis":
         try {
@@ -195,7 +207,14 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       }
 
       case "Marcar Consulta": {
-        // Obter slots e enviar lista interativa
+        // Aqui vamos usar o número armazenado no sessionUserMap
+        const fromNumber = sessionUserMap[sessionId];
+        if (!fromNumber || !twilioFromNumber) {
+          console.error("Número de usuário ou Twilio não definido.");
+          responseText =
+            "Não foi possível enviar a lista de horários disponíveis. Por favor, tente novamente mais tarde.";
+          break;
+        }
         try {
           const calendarId = "jurami.junior@gmail.com";
           const availableSlots = await getAvailableSlots(calendarId);
@@ -203,25 +222,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           if (availableSlots.length === 0) {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-            break;
-          }
-
-          console.log(
-            "originalDetectIntentRequest:",
-            req.body.originalDetectIntentRequest
-          );
-          console.log(
-            "payload.data:",
-            req.body.originalDetectIntentRequest?.payload?.data
-          );
-          const userNumber =
-            req.body.originalDetectIntentRequest?.payload?.data?.from;
-          const twilioFromNumber = process.env.TWILIO_PHONE_NUMBER;
-
-          if (!userNumber || !twilioFromNumber) {
-            console.error("Número de usuário ou Twilio não definido.");
-            responseText =
-              "Não foi possível enviar a lista de horários disponíveis. Por favor, tente novamente mais tarde.";
             break;
           }
 
@@ -235,7 +235,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           });
 
           const message = {
-            to: `whatsapp:${userNumber}`,
+            to: `whatsapp:${fromNumber}`,
             from: `whatsapp:${twilioFromNumber}`,
             interactive: {
               type: "list",
@@ -263,7 +263,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
           await twilioClient.messages.create(message);
 
-          // Apenas após criar a mensagem, retornamos a resposta
           responseText =
             "Enviei uma lista de horários disponíveis no WhatsApp. Por favor, escolha clicando em uma das opções.";
         } catch (error) {
@@ -288,7 +287,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         responseText = `Desculpe, não entendi sua solicitação. Poderia reformular?`;
     }
 
-    // Retorna a resposta ao Dialogflow
     if (!res.headersSent) {
       res.json({
         fulfillmentText: responseText,
@@ -304,7 +302,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
-    // Verificação da requisição do Twilio
     if (!req.body || (!req.body.From && !req.body.Interactive)) {
       console.error("Requisição inválida recebida:", req.body);
       if (!res.headersSent) {
@@ -319,7 +316,14 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
+
+    // Gerar um sessionId único para cada mensagem do usuário
     const sessionId = uuid.v4();
+
+    // Armazena o número do usuário na sessão
+    if (fromNumber) {
+      sessionUserMap[sessionId] = fromNumber;
+    }
 
     // Processar resposta interativa
     if (interactiveResponse.list_reply) {
@@ -335,7 +339,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           console.error("Slot selecionado não encontrado:", selectedOptionId);
 
           await twilioClient.messages.create({
-            from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+            from: `whatsapp:${twilioFromNumber}`,
             to: fromNumber,
             body: "Desculpe, o horário selecionado não está disponível. Por favor, tente novamente.",
           });
@@ -370,7 +374,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         });
 
         await twilioClient.messages.create({
-          from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+          from: `whatsapp:${twilioFromNumber}`,
           to: fromNumber,
           body: `Consulta marcada com sucesso para ${day} às ${time}.`,
         });
@@ -382,7 +386,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Processar mensagens normais
+    // Caso seja uma mensagem normal, enviar ao Dialogflow
     if (incomingMessage) {
       const dialogflowResponse = await axios.post(
         `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
@@ -406,7 +410,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         "Desculpe, não entendi. Poderia repetir?";
 
       await twilioClient.messages.create({
-        from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+        from: `whatsapp:${twilioFromNumber}`,
         to: fromNumber,
         body: responseMessage,
       });
