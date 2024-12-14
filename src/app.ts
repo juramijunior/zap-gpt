@@ -7,6 +7,7 @@ import { google } from "googleapis";
 import * as uuid from "uuid";
 import * as dateFnsTz from "date-fns-tz";
 import qs from "qs";
+import { formatISO } from "date-fns";
 
 const toZonedTime = dateFnsTz.toZonedTime;
 const format = dateFnsTz.format;
@@ -172,15 +173,15 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const selectedSlot = availableSlots[slotIndex];
         console.log("Valor de selectedSlot:", selectedSlot);
 
-        // Converta o formato "DD/MM/YYYY HH:mm" para um objeto Date ajustado para o fuso horário
+        // Extrai a data e hora do formato "DD/MM/YYYY HH:mm"
         const timeZone = "America/Sao_Paulo";
         const [datePart, timePart] = selectedSlot.split(" ");
         const [day, month, year] = datePart.split("/");
-        const formattedDateTime = new Date(
-          `${year}-${month}-${day}T${timePart}:00`
-        ); // Formata como ISO 8601
+        const formattedDateTime = `${year}-${month}-${day}T${timePart}:00`;
+
+        // Ajusta o horário para o fuso horário correto usando toZonedTime
         const startDateTime = dateFnsTz.toZonedTime(
-          formattedDateTime,
+          new Date(formattedDateTime),
           timeZone
         ); // Ajusta para o fuso horário
         const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // Adiciona 60 minutos (1 hora)
@@ -189,11 +190,11 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
           start: {
-            dateTime: startDateTime.toISOString(),
+            dateTime: startDateTime.toISOString(), // Formata como ISO 8601
             timeZone,
           },
           end: {
-            dateTime: endDateTime.toISOString(),
+            dateTime: endDateTime.toISOString(), // Formata como ISO 8601
             timeZone,
           },
         };
