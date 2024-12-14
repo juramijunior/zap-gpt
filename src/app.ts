@@ -173,28 +173,26 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const selectedSlot = availableSlots[slotIndex];
         console.log("Valor de selectedSlot:", selectedSlot);
 
-        // Extrai a data e hora do formato "DD/MM/YYYY HH:mm"
-        const timeZone = "America/Sao_Paulo";
+        // Converta o formato "DD/MM/YYYY HH:mm" para "YYYY-MM-DDTHH:mm:ss"
         const [datePart, timePart] = selectedSlot.split(" ");
         const [day, month, year] = datePart.split("/");
-        const formattedDateTime = `${year}-${month}-${day}T${timePart}:00`;
+        const [hour, minute] = timePart.split(":");
 
-        // Ajusta o horário para o fuso horário correto usando toZonedTime
-        const startDateTime = dateFnsTz.toZonedTime(
-          new Date(formattedDateTime),
-          timeZone
-        ); // Ajusta para o fuso horário
-        const endDateTime = new Date(startDateTime.getTime() + 60 * 60000); // Adiciona 60 minutos (1 hora)
+        const timeZone = "America/Sao_Paulo";
+        const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
+        const isoEndDateTime = `${year}-${month}-${day}T${String(
+          parseInt(hour, 10) + 1
+        ).padStart(2, "0")}:${minute}:00`;
 
         const event = {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
           start: {
-            dateTime: startDateTime.toISOString(), // Formata como ISO 8601
+            dateTime: isoStartDateTime,
             timeZone,
           },
           end: {
-            dateTime: endDateTime.toISOString(), // Formata como ISO 8601
+            dateTime: isoEndDateTime,
             timeZone,
           },
         };
