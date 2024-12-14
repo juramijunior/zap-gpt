@@ -43,6 +43,7 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
+// Armazenamento em memória: { [sessionId: string]: string (fromNumber) }
 const sessionUserMap: { [key: string]: string } = {};
 
 async function getAvailableSlots(
@@ -75,6 +76,7 @@ async function getAvailableSlots(
       let startHour = 0;
       let endHour = 0;
 
+      // Terça: 14-19, Quarta: 8-13
       if (dayOfWeek === 2) {
         startHour = 14;
         endHour = 19;
@@ -93,9 +95,13 @@ async function getAvailableSlots(
         const isFree = !events.some((event) => {
           const eventStart = event.start?.dateTime
             ? toZonedTime(new Date(event.start.dateTime), timeZone)
+            : event.start?.date
+            ? toZonedTime(new Date(event.start.date), timeZone)
             : null;
           const eventEnd = event.end?.dateTime
             ? toZonedTime(new Date(event.end.dateTime), timeZone)
+            : event.end?.date
+            ? toZonedTime(new Date(event.end.date), timeZone)
             : null;
 
           if (!eventStart || !eventEnd) {
@@ -131,22 +137,37 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
   try {
     switch (intentName) {
-      case "Selecionar Horário": {
-        const slotNumber = req.body.queryResult.parameters?.slotNumber;
-
-        if (!slotNumber || isNaN(parseInt(slotNumber))) {
+      case "Horários Disponíveis":
+        try {
+          const calendarId = "jurami.junior@gmail.com";
+          const availableSlots = await getAvailableSlots(calendarId);
+          if (availableSlots.length === 0) {
+            responseText =
+              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+          } else {
+            responseText = `Os horários disponíveis são: \n${availableSlots
+              .map((s, i) => `${i + 1}) ${s}`)
+              .join(
+                "\n"
+              )}\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta específica, responda com 0.`;
+          }
+        } catch (error) {
+          console.error("Erro ao obter horários:", error);
           responseText =
-            "Desculpe, não entendi o horário escolhido. Por favor, responda com um número da lista.";
-          break;
+            "Desculpe, ocorreu um erro ao obter os horários disponíveis. Tente novamente mais tarde.";
         }
+        break;
 
-        const slotIndex = parseInt(slotNumber) - 1;
+      case "Selecionar Horário": {
+        const slotIndex =
+          parseInt(req.body.queryResult.parameters.slotNumber) - 1;
         const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
 
-        if (parseInt(slotNumber) === 0) {
+        // Caso o usuário digite 0, poderia ser outra intenção, mas aqui só tratamos direto.
+        if (parseInt(req.body.queryResult.parameters.slotNumber) === 0) {
           responseText =
-            "Você escolheu cadastrar uma consulta manualmente. Por favor, informe o dia e horário desejado.";
+            "Você escolheu cadastrar uma consulta. Por favor, informe o dia e horário desejado ou selecione um horário da lista anterior.";
           break;
         }
 
@@ -188,6 +209,39 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
+      case "Marcar Consulta":
+        // Listar os horários disponíveis de forma simples (texto)
+        try {
+          const calendarId = "jurami.junior@gmail.com";
+          const availableSlots = await getAvailableSlots(calendarId);
+
+          if (availableSlots.length === 0) {
+            responseText =
+              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+          } else {
+            responseText = `Os horários disponíveis são: \n${availableSlots
+              .map((s, i) => `${i + 1}) ${s}`)
+              .join(
+                "\n"
+              )}\nPor favor, responda com o número do horário desejado.\nCaso queira cadastrar uma consulta manualmente, responda com 0.`;
+          }
+        } catch (error) {
+          console.error("Erro ao enviar lista de horários:", error);
+          responseText =
+            "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.";
+        }
+        break;
+
+      case "Agendamento de Consultas": {
+        const date = req.body.queryResult.parameters.date;
+        responseText = `Consulta agendada para ${date}. Caso precise alterar, entre em contato.`;
+        break;
+      }
+
+      case "Cancelar Consulta":
+        responseText = "Sua consulta foi cancelada com sucesso.";
+        break;
+
       default:
         responseText = `Desculpe, não entendi sua solicitação. Poderia reformular?`;
     }
@@ -205,6 +259,80 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   }
 });
 
+app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.body || (!req.body.From && !req.body.Body)) {
+      console.error("Requisição inválida recebida:", req.body);
+      if (!res.headersSent) {
+        res.status(400).send("Requisição inválida.");
+      }
+      return;
+    }
+
+    const fromNumber = req.body.From;
+    const incomingMessage = req.body.Body || "";
+
+    const client = await auth.getClient();
+    const accessToken = await client.getAccessToken();
+
+    const sessionId = uuid.v4();
+
+    if (fromNumber) {
+      sessionUserMap[sessionId] = fromNumber;
+    }
+
+    // Enviar mensagem para o Dialogflow para obter a resposta
+    const dialogflowResponse = await axios.post(
+      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
+      {
+        queryInput: {
+          text: {
+            text: incomingMessage,
+            languageCode: "pt-BR",
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken.token}`,
+        },
+      }
+    );
+
+    const responseMessage =
+      dialogflowResponse.data.queryResult.fulfillmentText ||
+      "Desculpe, não entendi. Poderia repetir?";
+
+    // Enviar mensagem de volta ao usuário via Twilio
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+    const data = {
+      To: fromNumber,
+      From: `whatsapp:${twilioFromNumber}`,
+      Body: responseMessage,
+    };
+
+    await axios.post(url, qs.stringify(data), {
+      auth: {
+        username: accountSid || "",
+        password: authToken || "",
+      },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    if (!res.headersSent) {
+      res.status(200).send("Mensagem processada com sucesso.");
+    }
+  } catch (error) {
+    console.error("Erro ao processar a mensagem:", error);
+    if (!res.headersSent) {
+      res.status(500).send("Erro ao processar a mensagem.");
+    }
+  }
+});
+
+// Iniciar o servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
