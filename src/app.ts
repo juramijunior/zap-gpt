@@ -11,14 +11,12 @@ import * as dateFnsTz from "date-fns-tz";
 const toZonedTime = dateFnsTz.toZonedTime;
 const format = dateFnsTz.format;
 
-// Validação das credenciais do Google
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 if (!credentialsJson) {
   throw new Error("As credenciais do Google não estão definidas.");
 }
 const parsedCredentials = JSON.parse(credentialsJson);
 
-// Configuração do Twilio
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twilioClient = new Twilio(accountSid, authToken);
@@ -53,7 +51,7 @@ async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
 ): Promise<string[]> {
-  const timeIncrement = 60; // Intervalo em minutos
+  const timeIncrement = 60;
   const timeZone = "America/Sao_Paulo";
   let startDate = new Date();
   let endDate = new Date();
@@ -237,6 +235,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           const message = {
             to: `whatsapp:${fromNumber}`,
             from: `whatsapp:${twilioFromNumber}`,
+            type: "interactive",
             interactive: {
               type: "list",
               header: {
