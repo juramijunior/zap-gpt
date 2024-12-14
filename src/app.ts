@@ -177,24 +177,26 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const [day, month, year] = datePart.split("/");
         const formattedDateTime = `${year}-${month}-${day}T${timePart}:00`;
 
-        // Crie o objeto Date usando o formato corrigido
-        const selectedDateTime = new Date(formattedDateTime);
-        if (isNaN(selectedDateTime.getTime())) {
-          throw new Error(`Horário inválido: ${selectedSlot}`);
-        }
+        // Use a função `toZonedTime` para ajustar ao fuso horário correto
+        const timeZone = "America/Sao_Paulo";
+        const selectedDateTime = toZonedTime(
+          new Date(formattedDateTime),
+          timeZone
+        );
 
         const event = {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
           start: {
-            dateTime: selectedDateTime.toISOString(),
-            timeZone: "America/Sao_Paulo",
+            dateTime: selectedDateTime.toISOString(), // Usa o horário correto ajustado ao fuso
+            timeZone, // Define explicitamente o fuso horário
           },
           end: {
-            dateTime: new Date(
-              selectedDateTime.getTime() + 60 * 60000
-            ).toISOString(),
-            timeZone: "America/Sao_Paulo",
+            dateTime: toZonedTime(
+              new Date(selectedDateTime.getTime() + 60 * 60000),
+              timeZone
+            ).toISOString(), // Adiciona 60 minutos ao horário inicial
+            timeZone, // Define explicitamente o fuso horário
           },
         };
 
@@ -211,6 +213,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         }
         break;
       }
+
       case "Marcar Consulta":
         try {
           const calendarId = "jurami.junior@gmail.com";
