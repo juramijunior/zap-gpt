@@ -206,6 +206,14 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             break;
           }
 
+          console.log(
+            "originalDetectIntentRequest:",
+            req.body.originalDetectIntentRequest
+          );
+          console.log(
+            "payload.data:",
+            req.body.originalDetectIntentRequest?.payload?.data
+          );
           const userNumber =
             req.body.originalDetectIntentRequest?.payload?.data?.from;
           const twilioFromNumber = process.env.TWILIO_PHONE_NUMBER;
