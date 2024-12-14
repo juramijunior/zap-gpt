@@ -172,8 +172,13 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const selectedSlot = availableSlots[slotIndex];
         console.log("Valor de selectedSlot:", selectedSlot);
 
-        // Crie o objeto de data
-        const selectedDateTime = new Date(Date.parse(selectedSlot));
+        // Converta o formato "DD/MM/YYYY HH:mm" para "YYYY-MM-DDTHH:mm:ss"
+        const [datePart, timePart] = selectedSlot.split(" ");
+        const [day, month, year] = datePart.split("/");
+        const formattedDateTime = `${year}-${month}-${day}T${timePart}:00`;
+
+        // Crie o objeto Date usando o formato corrigido
+        const selectedDateTime = new Date(formattedDateTime);
         if (isNaN(selectedDateTime.getTime())) {
           throw new Error(`Horário inválido: ${selectedSlot}`);
         }
@@ -206,7 +211,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         }
         break;
       }
-
       case "Marcar Consulta":
         try {
           const calendarId = "jurami.junior@gmail.com";
