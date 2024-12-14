@@ -158,16 +158,10 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
 
       case "Selecionar Horário": {
-        const slotIndex = parseInt(req.body.queryResult.parameters?.number) - 1;
+        const slotNumber = req.body.queryResult.parameters?.number;
+        const slotIndex = parseInt(slotNumber) - 1;
         const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
-
-        // Caso o usuário digite 0, poderia ser outra intenção, mas aqui só tratamos direto.
-        if (parseInt(req.body.queryResult.parameters?.number) === 0) {
-          responseText =
-            "Você escolheu cadastrar uma consulta. Por favor, informe o dia e horário desejado ou selecione um horário da lista anterior.";
-          break;
-        }
 
         if (slotIndex < 0 || slotIndex >= availableSlots.length) {
           responseText =
@@ -176,7 +170,13 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         }
 
         const selectedSlot = availableSlots[slotIndex];
-        const selectedDateTime = new Date(selectedSlot.replace(" ", "T"));
+        console.log("Valor de selectedSlot:", selectedSlot);
+
+        // Crie o objeto de data
+        const selectedDateTime = new Date(Date.parse(selectedSlot));
+        if (isNaN(selectedDateTime.getTime())) {
+          throw new Error(`Horário inválido: ${selectedSlot}`);
+        }
 
         const event = {
           summary: "Consulta",
