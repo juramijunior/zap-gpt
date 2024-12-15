@@ -255,6 +255,31 @@ Me conta como podemos te ajudar❓`;
         break;
       }
 
+      case "introducao_alimentar":
+        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉
+
+A Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes, para que esse processo tão importante do desenvolvimento dele seja feito da melhor maneira possível e não se torne uma preocupação para você. 
+
+Antes da primeira consulta será enviado um questionário, para entender melhor as particularidades do seu filho e a rotina da família, pois assim, durante o tempo de consulta, a Dra vai consegui priorizar as questões mais importantes...
+
+Na primeira consulta, que dura em torno de 1h, ela vai te ouvir para poder entender a rotina da casa e se aprofundar nas necessidades específicas do bebê. A Dra pesa e mede o seu bebê durante a consulta, insere os dados nas curvas de crescimento e assim faz o diagnóstico nutricional, verificando se o seu bebê está crescendo conforme o esperado para a idade.
+
+Ela também prescreve as suplementações necessárias de acordo com as recomendações da sociedade brasileira de pediatria...
+
+Pelos próximos 30 dias após a consulta, você conta com a facilidade de acessar todo o material da consulta (plano alimentar, receitas e prescrições, orientações, pedidos de exame, etc) pelo aplicativo da Dra. Sabrina.
+
+O seu acompanhamento será feito pelo chat do app. Uma vez por semana durante os 30 dias, a Dra acessa o chat responder a todas as suas dúvidas.
+
+O planejamento de consultas para introdução alimentar consiste em:
+
+🔹5 a 6 meses: orientações para iniciar a alimentação, como oferecer, etc
+
+🔹7 meses: orientações sobre como introduzir os alimentos alergênicos e aproveitar a janela imunológica 
+
+🔹9 meses: evolução da texturas dos alimentos e introdução de outros tipos de comidinhas
+
+🔹12 meses: primeiro check up de exames do bebê, ajustes de doses das vitaminas e orientações sobre como fazer a mudança da "papinha" para a alimentação da família.`;
+        break;
       case "Cancelar Consulta":
         responseText = "Sua consulta foi cancelada com sucesso.";
         break;
