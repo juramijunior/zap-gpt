@@ -239,6 +239,22 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
+      case "saudacoes_e_boas_vindas": {
+        //const date = req.body.queryResult.parameters.date;
+        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕
+
+🛜Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*
+https://www.instagram.com/nutrisabrina.lagos?igsh=MWFrbnZ0ZmY1d2g5ZA==
+
+*Dicas* para facilitar a nossa comunicação:
+📵 Esse número não atende ligações;
+🚫 Não ouvimos áudios;
+⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.
+
+Me conta como podemos te ajudar❓`;
+        break;
+      }
+
       case "Cancelar Consulta":
         responseText = "Sua consulta foi cancelada com sucesso.";
         break;
