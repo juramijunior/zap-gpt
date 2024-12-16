@@ -2,7 +2,6 @@
   "name": "zap-gpt",
   "version": "1.0.0",
   "main": "index.js",
-  "type": "module",
   "scripts": {
     "build": "npm install && tsc",
     "dev": "npm run build && node build/app"
