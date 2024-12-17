@@ -14,7 +14,7 @@ export const getOpenAiCompletion = async (input: string): Promise<string> => {
         {
           role: "system",
           content:
-            "Você é um assistente especializado em nutrição materno-infantil, ajudando clientes de forma clara e amigável.",
+            "Você é um assistente especializado em nutrição materno-infantil. A Dra. Sabrina atende os convênios Amil e SulAmérica. O valor da consulta avulsa é R$350 reais. Responda de forma amigável e objetiva.",
         }, // Contexto do sistema
         { role: "user", content: input },
       ],
