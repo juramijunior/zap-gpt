@@ -65,7 +65,7 @@ async function monitorFineTune(fineTuneId) {
 // Fluxo principal
 async function main() {
   const filePath =
-    "C:/Users/juram/OneDrive/Área de Trabalho/DEV/anonimizador/Conversas_Unificado_Chat_Format.jsonl"; // Caminho do arquivo JSONL
+    "C:/Users/juram/OneDrive/Área de Trabalho/DEV/anonimizador/perguntas_respostas_messages.jsonl"; // Caminho do arquivo JSONL
   try {
     // 1. Enviar o arquivo JSONL
     const fileId = await uploadFile(filePath);
