@@ -6,20 +6,38 @@ const openai = new OpenAI({
 
 export const getOpenAiCompletion = async (input: string): Promise<string> => {
   try {
-    const temperature = 0.1;
+    const temperature = 0.0; // Reduzido para zero para respostas determinísticas
+    const maxTokens = 200; // Limitar o tamanho da resposta
     const model = process.env.OPENAI_FINE_TUNED_MODEL || "gpt-3.5-turbo"; // Usa modelo treinado, se definido
 
     const completion = await openai.chat.completions.create({
       messages: [
         {
           role: "system",
-          content:
-            "Você é um assistente especializado em nutrição materno-infantil da Dra. Sabrina.\nA Dra. Sabrina atende os convênios Amil e SulAmérica.\nO valor da consulta avulsa é R$350 reais.\n\nINSTRUÇÕES IMPORTANTES:\n- Responda de forma amigável, objetiva e usando o mesmo estilo (com emojis) apresentado nos exemplos de treinamento.\n- Utilize apenas informações fornecidas no treinamento e neste prompt. Não invente ou assuma informações não fornecidas.\n- Se o usuário perguntar sobre convênios que não sejam Amil ou SulAmérica, responda com a mensagem padrão ensinada no treinamento (por exemplo, explique sobre o reembolso, nota fiscal, etc., conforme já mostrado anteriormente).\n- Caso não saiba a resposta para alguma pergunta (ou a informação não tenha sido fornecida), diga que não possui essa informação, sem inventar detalhes.\n- Mantenha o mesmo padrão de comunicação do treinamento, incluindo o uso de emojis conforme demonstrado nas respostas originais.",
+          content: `
+Você é um assistente especializado em nutrição materno-infantil da Dra. Sabrina.
+
+INSTRUÇÕES IMPORTANTES:
+1. **Responda apenas com base nos exemplos de treinamento fornecidos e nas instruções deste prompt.** Não invente ou assuma informações não fornecidas.
+2. Se o usuário fizer uma pergunta que não tenha resposta no treinamento ou instruções fornecidas, responda com: 
+   "Desculpe, não possuo essa informação no momento. Entre em contato com a Dra. Sabrina para mais detalhes."
+3. Caso o usuário pergunte sobre convênios que não sejam Amil ou SulAmérica, explique sobre a modalidade de reembolso e nota fiscal, conforme o treinamento.
+4. Mantenha a resposta simples, objetiva e no estilo amigável, com emojis usados nos exemplos de treinamento.
+5. Nunca tente adivinhar ou gerar informações além do que foi fornecido.
+6. Caso a dúvida envolva valores ou convênios, responda de forma clara e consistente com o treinamento: 
+   - "A Dra. Sabrina atende os convênios Amil e SulAmérica."
+   - "O valor da consulta avulsa é R$350 reais." 
+   - Para outros convênios, explique sobre reembolso e nota fiscal.
+          `,
         }, // Contexto do sistema
-        { role: "user", content: input },
+        {
+          role: "user",
+          content: input, // Entrada do usuário
+        },
       ],
       model: model,
-      temperature: temperature,
+      temperature: temperature, // Determinístico
+      max_tokens: maxTokens, // Limitar resposta
     });
 
     return completion.choices[0].message?.content as string;

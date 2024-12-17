@@ -32,7 +32,7 @@ async function createFineTune(fileId) {
   try {
     const response = await openai.fineTuning.jobs.create({
       training_file: fileId,
-      model: "gpt-3.5-turbo", // Substitua por "gpt-4" se sua conta suportar
+      model: "gpt-4o-mini-2024-07-18", // Substituído para "gpt-4o-mini"
     });
     console.log("Treinamento iniciado. ID:", response.id);
     return response.id; // Retorna o ID do fine-tuning
