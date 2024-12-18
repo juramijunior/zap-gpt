@@ -237,9 +237,12 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
 
       default:
+        console.log("Enviando mensagem para o ChatGPT...");
+        console.log("Mensagem enviada:", finalUserInput || userQuery);
+
         try {
           // Chama o GPT para lidar com intenções desconhecidas
-          responseText = await getOpenAiCompletion(userQuery);
+          responseText = await getOpenAiCompletion(finalUserInput);
         } catch (gptError) {
           console.error("Erro ao processar com OpenAI:", gptError);
           responseText =
