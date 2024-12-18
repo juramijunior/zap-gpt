@@ -319,20 +319,20 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
-    if (
-      !req.body ||
-      (!req.body.From && !req.body.Body && !req.body.MediaUrl0)
-    ) {
-      res.status(400).send("Requisição inválida.");
+    // Extração segura do número de origem
+    const fromNumber =
+      req.body.originalDetectIntentRequest?.payload?.data?.From || null;
+    const incomingMessage =
+      req.body.queryResult?.queryText ||
+      req.body.originalDetectIntentRequest?.payload?.data?.Body ||
+      "";
+    const audioUrl =
+      req.body.originalDetectIntentRequest?.payload?.data?.MediaUrl0 || null;
+
+    if (!fromNumber) {
+      res.status(400).send("Número de origem ausente.");
       return;
     }
-
-    const fromNumber = req.body.From;
-    const incomingMessage = req.body.Body || "";
-    const audioUrl = req.body.MediaUrl0; // URL do áudio enviado pelo Twilio
-    const sessionId = uuidv4();
-    const client = await auth.getClient();
-    const accessToken = await client.getAccessToken();
 
     let finalUserMessage = incomingMessage;
 
@@ -349,29 +349,17 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Passo 2: Enviar mensagem (ou transcrição) para o Dialogflow
-    const dialogflowResponse = await axios.post(
-      `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
-      {
-        queryInput: {
-          text: { text: finalUserMessage, languageCode: "pt-BR" },
-        },
-      },
-      { headers: { Authorization: `Bearer ${accessToken.token}` } }
-    );
+    // Passo 2: Processar a mensagem com o Dialogflow (responder via fulfillment)
+    const dialogflowResponseText =
+      req.body.queryResult?.fulfillmentText || "Não entendi sua mensagem.";
+    const responseParts = dividirMensagem(dialogflowResponseText);
 
-    const fullResponseMessage =
-      dialogflowResponse.data.queryResult.fulfillmentText ||
-      "Desculpe, não entendi.";
-
-    // Passo 3: Dividir mensagem e enviar pelo Twilio
-    const partesMensagem = dividirMensagem(fullResponseMessage);
-    for (const parte of partesMensagem) {
+    for (const part of responseParts) {
       const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
       const data = {
         To: fromNumber,
         From: `whatsapp:${twilioFromNumber}`,
-        Body: parte,
+        Body: part,
       };
 
       await axios.post(url, qs.stringify(data), {
