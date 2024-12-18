@@ -227,31 +227,34 @@ const fulfillmentHandler: RequestHandler = async (
         try {
           const calendarId = "jurami.junior@gmail.com";
 
-          const outputContexts = req.body.queryResult.outputContexts || [];
-          const sessionContext =
-            outputContexts.find((ctx: { name: string }) =>
-              ctx.name.endsWith("/session_vars")
-            ) || {};
-          const sessionVars = sessionContext.parameters || {};
+          const outputContexts: OutputContext[] =
+            req.body.queryResult.outputContexts || [];
+          const sessionContext = outputContexts.find((ctx) =>
+            ctx.name.endsWith("/session_vars")
+          ) || { parameters: {} };
+          const sessionVars: SessionVars = sessionContext.parameters || {};
 
+          // Primeira etapa: listar horários disponíveis
           if (!sessionVars.step) {
             const availableSlots = await getAvailableSlots(calendarId);
-            if (availableSlots.length === 0) {
-              responseText =
-                "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-              return void res.json({ fulfillmentText: responseText });
+
+            if (!availableSlots || availableSlots.length === 0) {
+              res.json({
+                fulfillmentText:
+                  "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.",
+              });
+              return;
             }
 
             sessionVars.slots = availableSlots.slice(0, 4);
             sessionVars.step = "choose_slot";
-            responseText =
-              sessionVars.slots
-                .map((s: string, i: number) => `${i + 1}) ${s}`)
-                .join("\n") +
-              "\n\nPor favor, responda com o número do horário desejado.";
 
-            return void res.json({
-              fulfillmentText: responseText,
+            const slotOptions = sessionVars.slots
+              .map((slot, index) => `${index + 1}) ${slot}`)
+              .join("\n");
+
+            res.json({
+              fulfillmentText: `${slotOptions}\n\nPor favor, escolha o número do horário desejado.`,
               outputContexts: [
                 {
                   name: `${req.body.session}/contexts/session_vars`,
@@ -260,26 +263,47 @@ const fulfillmentHandler: RequestHandler = async (
                 },
               ],
             });
+            return;
           }
 
+          // Segunda etapa: usuário escolhe um horário
           if (sessionVars.step === "choose_slot") {
             const slotNumber = parseInt(req.body.queryResult.queryText, 10);
 
             if (
-              isNaN(slotNumber) ||
-              slotNumber < 1 ||
-              slotNumber > sessionVars.slots.length
+              sessionVars.slots &&
+              slotNumber > 0 &&
+              slotNumber <= sessionVars.slots.length
             ) {
-              responseText = "Por favor, informe um número válido da lista.";
-              return void res.json({ fulfillmentText: responseText });
+              sessionVars.selectedSlot = sessionVars.slots[slotNumber - 1];
+              sessionVars.step = "ask_name";
+
+              res.json({
+                fulfillmentText: "Qual é o seu nome?",
+                outputContexts: [
+                  {
+                    name: `${req.body.session}/contexts/session_vars`,
+                    lifespanCount: 5,
+                    parameters: sessionVars,
+                  },
+                ],
+              });
+            } else {
+              res.json({
+                fulfillmentText:
+                  "Por favor, informe um número válido da lista.",
+              });
             }
+            return;
+          }
 
-            sessionVars.selectedSlot = sessionVars.slots[slotNumber - 1];
-            sessionVars.step = "ask_name";
-            responseText = "Qual é o seu nome?";
+          // Terceira etapa: usuário informa o nome
+          if (sessionVars.step === "ask_name") {
+            sessionVars.name = req.body.queryResult.queryText;
+            sessionVars.step = "confirm";
 
-            return void res.json({
-              fulfillmentText: responseText,
+            res.json({
+              fulfillmentText: `Confirme o agendamento para ${sessionVars.selectedSlot}. Responda com "sim" para confirmar ou "não" para cancelar.`,
               outputContexts: [
                 {
                   name: `${req.body.session}/contexts/session_vars`,
@@ -288,64 +312,75 @@ const fulfillmentHandler: RequestHandler = async (
                 },
               ],
             });
+            return;
           }
 
+          // Quarta etapa: confirmação do agendamento
           if (sessionVars.step === "confirm") {
-            if (!sessionVars.selectedSlot) {
-              responseText =
-                "Houve um problema ao recuperar o horário selecionado. Tente novamente.";
-              return void res.json({ fulfillmentText: responseText });
+            const confirmation = req.body.queryResult.queryText.toLowerCase();
+
+            if (confirmation === "sim" && sessionVars.selectedSlot) {
+              const [datePart, timePart] = sessionVars.selectedSlot.split(" ");
+              const [day, month, year] = datePart.split("/");
+              const [hour, minute] = timePart.split(":");
+
+              const timeZone = "America/Sao_Paulo";
+              const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
+              const isoEndDateTime = `${year}-${month}-${day}T${String(
+                parseInt(hour, 10) + 1
+              ).padStart(2, "0")}:${minute}:00`;
+
+              const event = {
+                summary: "Consulta",
+                description: `Consulta agendada com ${sessionVars.name}.`,
+                start: { dateTime: isoStartDateTime, timeZone },
+                end: { dateTime: isoEndDateTime, timeZone },
+              };
+
+              await calendar.events.insert({
+                calendarId,
+                requestBody: event,
+              });
+
+              res.json({
+                fulfillmentText: `Consulta marcada com sucesso para ${sessionVars.selectedSlot}. Obrigado, ${sessionVars.name}!`,
+                outputContexts: [
+                  {
+                    name: `${req.body.session}/contexts/session_vars`,
+                    lifespanCount: 0,
+                  },
+                ],
+              });
+              return;
             }
 
-            const [datePart, timePart] = sessionVars.selectedSlot.split(" ");
-            const [day, month, year] = datePart.split("/");
-            const [hour, minute] = timePart.split(":");
+            if (confirmation === "não") {
+              res.json({
+                fulfillmentText:
+                  "Agendamento cancelado. Se precisar, estou à disposição para ajudar.",
+                outputContexts: [
+                  {
+                    name: `${req.body.session}/contexts/session_vars`,
+                    lifespanCount: 0,
+                  },
+                ],
+              });
+              return;
+            }
 
-            const timeZone = "America/Sao_Paulo";
-            const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
-            const isoEndDateTime = `${year}-${month}-${day}T${String(
-              parseInt(hour, 10) + 1
-            ).padStart(2, "0")}:${minute}:00`;
-
-            const event = {
-              summary: "Consulta",
-              description: `Consulta agendada com ${
-                sessionVars.name || "Nome não informado"
-              }.\nTelefone: ${
-                sessionVars.phone || "Telefone não informado"
-              }\nE-mail: ${sessionVars.email || "E-mail não informado"}`,
-              start: { dateTime: isoStartDateTime, timeZone },
-              end: { dateTime: isoEndDateTime, timeZone },
-            };
-
-            await calendar.events.insert({
-              calendarId,
-              requestBody: event,
+            res.json({
+              fulfillmentText: "Por favor, responda com 'sim' ou 'não'.",
             });
-
-            responseText = `Consulta marcada com sucesso para ${
-              sessionVars.selectedSlot
-            }. Obrigado, ${sessionVars.name || ""}!`;
-
-            sessionVars.step = null;
-            return void res.json({
-              fulfillmentText: responseText,
-              outputContexts: [
-                {
-                  name: `${req.body.session}/contexts/session_vars`,
-                  lifespanCount: 0,
-                },
-              ],
-            });
+            return;
           }
         } catch (error) {
           console.error("Erro ao processar solicitação:", error);
-          responseText =
-            "Desculpe, ocorreu um erro no sistema. Por favor, tente novamente mais tarde.";
-          return void res.json({ fulfillmentText: responseText });
+          res.json({
+            fulfillmentText:
+              "Desculpe, ocorreu um erro no sistema. Por favor, tente novamente mais tarde.",
+          });
         }
         break;
-
       case "saudacoes_e_boas_vindas":
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\nMe conta como posso te ajudar?`;
         return void res.json({ fulfillmentText: responseText });
@@ -448,3 +483,16 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
+
+interface OutputContext {
+  name: string;
+  lifespanCount?: number;
+  parameters?: { [key: string]: any };
+}
+
+interface SessionVars {
+  step?: string;
+  slots?: string[];
+  selectedSlot?: string;
+  name?: string;
+}
