@@ -1,4 +1,10 @@
 import OpenAI from "openai";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static";
+import fetch from "node-fetch"; // Para baixar o áudio
+import { Readable } from "stream";
+import fs from "fs";
+import path from "path";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY, // Certifique-se de definir sua API Key no .env
@@ -50,22 +56,41 @@ INSTRUÇÕES IMPORTANTES:
 
 export const transcribeAudio = async (audioUrl: string): Promise<string> => {
   try {
-    // Baixa o áudio
+    console.log("Baixando o áudio...");
     const audioResponse = await fetch(audioUrl);
-    const audioBuffer = await audioResponse.arrayBuffer();
+    const audioBuffer = await audioResponse.buffer();
 
-    // Converte Blob em File
-    const audioFile = new File([audioBuffer], "audio.mp3", {
-      type: "audio/mpeg",
+    // Salva o áudio temporariamente
+    const inputPath = path.resolve("temp", "input.ogg");
+    const outputPath = path.resolve("temp", "output.mp3");
+
+    fs.writeFileSync(inputPath, audioBuffer);
+
+    console.log("Convertendo o áudio para MP3...");
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg()
+        .setFfmpegPath(ffmpegStatic as string)
+        .input(inputPath)
+        .audioCodec("libmp3lame")
+        .toFormat("mp3")
+        .on("end", () => resolve()) // Função vazia que respeita o tipo `() => void`
+        .on("error", (error) => reject(error))
+        .save(outputPath);
     });
 
     // Transcrição com Whisper
+    console.log("Transcrevendo o áudio...");
     const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
+      file: fs.createReadStream(outputPath) as any,
       model: "whisper-1",
-      language: "pt", // Define o idioma português
+      language: "pt",
     });
 
+    // Limpa os arquivos temporários
+    fs.unlinkSync(inputPath);
+    fs.unlinkSync(outputPath);
+
+    console.log("Transcrição concluída:", transcription.text);
     return transcription.text;
   } catch (error) {
     console.error("Erro ao transcrever o áudio:", error);
