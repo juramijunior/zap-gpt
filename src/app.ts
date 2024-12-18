@@ -159,6 +159,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         try {
           const calendarId = "jurami.junior@gmail.com";
           const availableSlots = await getAvailableSlots(calendarId);
+
           if (availableSlots.length === 0) {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
@@ -167,7 +168,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
               .map((s, i) => `${i + 1}) ${s}`)
               .join(
                 "\n"
-              )}\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta específica, responda com 0.`;
+              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta específica, responda com 0.`;
           }
         } catch (error) {
           console.error("Erro ao obter horários:", error);
@@ -178,6 +179,12 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
       case "Selecionar Horário": {
         const slotNumber = req.body.queryResult.parameters?.number;
+
+        if (!slotNumber) {
+          responseText = "Por favor, informe um número válido para o horário.";
+          break;
+        }
+
         const slotIndex = parseInt(slotNumber) - 1;
         const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
@@ -191,6 +198,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const selectedSlot = availableSlots[slotIndex];
         console.log("Valor de selectedSlot:", selectedSlot);
 
+        // Converte para o formato ISO
         const [datePart, timePart] = selectedSlot.split(" ");
         const [day, month, year] = datePart.split("/");
         const [hour, minute] = timePart.split(":");
@@ -204,14 +212,8 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const event = {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
-          start: {
-            dateTime: isoStartDateTime,
-            timeZone,
-          },
-          end: {
-            dateTime: isoEndDateTime,
-            timeZone,
-          },
+          start: { dateTime: isoStartDateTime, timeZone },
+          end: { dateTime: isoEndDateTime, timeZone },
         };
 
         try {
@@ -228,26 +230,42 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
-      case "saudacoes_e_boas_vindas":
-        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem.\n\nMe conta como podemos te ajudar❓`;
+      case "Marcar Consulta":
+        try {
+          const calendarId = "jurami.junior@gmail.com";
+          const availableSlots = await getAvailableSlots(calendarId);
+
+          if (availableSlots.length === 0) {
+            responseText =
+              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+          } else {
+            responseText = `Os horários disponíveis são:\n${availableSlots
+              .map((s, i) => `${i + 1}) ${s}`)
+              .join(
+                "\n"
+              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
+          }
+        } catch (error) {
+          console.error("Erro ao buscar os horários disponíveis:", error);
+          responseText =
+            "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.";
+        }
         break;
 
-      case "Cancelar Consulta":
-        responseText = "Sua consulta foi cancelada com sucesso.";
+      case "saudacoes_e_boas_vindas":
+        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
+        break;
+
+      case "introducao_alimentar":
+        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
         break;
 
       default:
         console.log("Enviando mensagem para o ChatGPT...");
-        console.log("Mensagem enviada:", finalUserInput || userQuery);
+        console.log("Mensagem enviada:", finalUserInput);
 
-        try {
-          // Chama o GPT para lidar com intenções desconhecidas
-          responseText = await getOpenAiCompletion(finalUserInput);
-        } catch (gptError) {
-          console.error("Erro ao processar com OpenAI:", gptError);
-          responseText =
-            "Desculpe, ocorreu um erro ao processar sua solicitação. Tente novamente mais tarde.";
-        }
+        responseText = await getOpenAiCompletion(finalUserInput);
+        console.log("Resposta do GPT:", responseText);
     }
 
     if (!res.headersSent) {
