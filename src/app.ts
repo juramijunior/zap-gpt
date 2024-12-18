@@ -223,6 +223,19 @@ const fulfillmentHandler: RequestHandler = async (
           return void res.json({ fulfillmentText: responseText });
         }
 
+        interface OutputContext {
+          name: string;
+          lifespanCount?: number;
+          parameters?: { [key: string]: any };
+        }
+
+        interface SessionVars {
+          step?: string; // Etapa atual
+          slots?: string[]; // Lista de horários
+          selectedSlot?: string; // Horário escolhido
+          name?: string; // Nome do usuário
+        }
+
       case "Marcar Consulta":
         try {
           const calendarId = "jurami.junior@gmail.com";
@@ -230,14 +243,15 @@ const fulfillmentHandler: RequestHandler = async (
           // Recuperar os contextos e sessionVars
           const outputContexts: OutputContext[] =
             req.body.queryResult.outputContexts || [];
-          const sessionContext = outputContexts.find((ctx) =>
+          let sessionContext = outputContexts.find((ctx) =>
             ctx.name.endsWith("/session_vars")
           ) || { parameters: {} };
+
           const sessionVars: SessionVars = sessionContext.parameters || {};
 
-          console.log("Etapa atual:", sessionVars.step); // Log da etapa atual
+          console.log("Etapa atual:", sessionVars.step);
 
-          // Primeira etapa: Listar horários disponíveis
+          // =================== Etapa 1: Listar horários ===================
           if (!sessionVars.step) {
             const availableSlots = await getAvailableSlots(calendarId);
 
@@ -269,7 +283,7 @@ const fulfillmentHandler: RequestHandler = async (
             return;
           }
 
-          // Segunda etapa: Usuário escolhe o horário
+          // =================== Etapa 2: Escolher horário ===================
           if (sessionVars.step === "choose_slot") {
             const slotNumber = parseInt(req.body.queryResult.queryText, 10);
 
@@ -307,7 +321,7 @@ const fulfillmentHandler: RequestHandler = async (
             return;
           }
 
-          // Terceira etapa: Usuário informa o nome
+          // =================== Etapa 3: Capturar nome ===================
           if (sessionVars.step === "ask_name") {
             sessionVars.name = req.body.queryResult.queryText;
             sessionVars.step = "confirm";
@@ -325,7 +339,7 @@ const fulfillmentHandler: RequestHandler = async (
             return;
           }
 
-          // Quarta etapa: Confirmação do agendamento
+          // =================== Etapa 4: Confirmar agendamento ===================
           if (sessionVars.step === "confirm") {
             const confirmation = req.body.queryResult.queryText.toLowerCase();
 
@@ -357,7 +371,7 @@ const fulfillmentHandler: RequestHandler = async (
                 outputContexts: [
                   {
                     name: `${req.body.session}/contexts/session_vars`,
-                    lifespanCount: 0,
+                    lifespanCount: 0, // Contexto encerra
                   },
                 ],
               });
