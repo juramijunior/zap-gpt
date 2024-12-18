@@ -57,21 +57,37 @@ INSTRUÇÕES IMPORTANTES:
 export const transcribeAudio = async (audioUrl: string): Promise<string> => {
   try {
     console.log("Baixando o áudio...");
-    const audioResponse = await fetch(audioUrl);
+
+    // Baixa o áudio como binário
+    const audioResponse = await fetch(audioUrl, {
+      headers: { Accept: "audio/ogg" },
+    });
+    if (!audioResponse.ok) {
+      throw new Error(`Erro ao baixar o áudio: ${audioResponse.statusText}`);
+    }
+
     const audioBuffer = await audioResponse.buffer();
 
-    // Caminhos dos arquivos temporários
+    // Caminhos temporários
     const tempDir = path.resolve("temp");
     const inputPath = path.join(tempDir, "input.ogg");
     const outputPath = path.join(tempDir, "output.mp3");
 
-    // Cria o diretório 'temp' se ele não existir
+    // Cria o diretório 'temp' se não existir
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
 
+    // Salva o áudio localmente
     fs.writeFileSync(inputPath, audioBuffer);
+    console.log("Áudio salvo com sucesso.");
 
+    // Verifica se o arquivo baixado é válido
+    if (audioBuffer.length === 0) {
+      throw new Error("O arquivo de áudio está vazio.");
+    }
+
+    // Converte o áudio para MP3
     console.log("Convertendo o áudio para MP3...");
     await new Promise<void>((resolve, reject) => {
       ffmpeg()
@@ -79,12 +95,12 @@ export const transcribeAudio = async (audioUrl: string): Promise<string> => {
         .input(inputPath)
         .audioCodec("libmp3lame")
         .toFormat("mp3")
-        .on("end", () => resolve()) // Função vazia que respeita o tipo `() => void`
-        .on("error", (error) => reject(error))
+        .on("end", () => resolve())
+        .on("error", (error) => reject(`Erro ao converter o áudio: ${error}`))
         .save(outputPath);
     });
 
-    // Transcrição com Whisper
+    // Transcreve o áudio com Whisper
     console.log("Transcrevendo o áudio...");
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(outputPath) as any,
@@ -92,14 +108,14 @@ export const transcribeAudio = async (audioUrl: string): Promise<string> => {
       language: "pt",
     });
 
-    // Limpa os arquivos temporários
+    // Remove arquivos temporários
     fs.unlinkSync(inputPath);
     fs.unlinkSync(outputPath);
 
     console.log("Transcrição concluída:", transcription.text);
     return transcription.text;
   } catch (error) {
-    console.error("Erro ao transcrever o áudio:", error);
+    console.error("Erro ao processar o áudio:", error);
     throw new Error("Não foi possível processar o áudio enviado.");
   }
 };
