@@ -1,5 +1,6 @@
 import "dotenv/config";
-import express, { Request, Response } from "express";
+import express from "express";
+import { Request, Response, RequestHandler } from "express";
 import bodyParser from "body-parser";
 import axios from "axios";
 import { GoogleAuth } from "google-auth-library";
@@ -137,11 +138,17 @@ async function getAvailableSlots(
   }
 }
 
-app.post("/fulfillment", async (req: Request, res: Response) => {
-  const intentName = req.body.queryResult.intent.displayName;
+// Rota do Express
+
+// Fulfillment Handler
+const fulfillmentHandler: RequestHandler = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const intentName = req.body.queryResult?.intent?.displayName || "";
   const sessionPath: string = req.body.session || "";
   const sessionId = sessionPath.split("/").pop() || "";
-  const userQuery = req.body.queryResult.queryText;
+  const userQuery = req.body.queryResult?.queryText || "";
   const audioUrl = req.body.originalDetectIntentRequest?.payload?.audioUrl;
 
   let responseText = "Desculpe, não entendi sua solicitação.";
@@ -149,7 +156,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   try {
     let finalUserInput = userQuery;
 
-    // Se houver um áudio, transcreve antes de processar
+    // Transcrição de áudio, se houver
     if (audioUrl) {
       try {
         console.log("Áudio recebido. Iniciando transcrição...");
@@ -159,235 +166,213 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         console.error("Erro ao transcrever o áudio:", audioError);
         responseText =
           "Não consegui entender o áudio enviado. Tente novamente.";
+        return void res.json({ fulfillmentText: responseText });
       }
     }
+
+    // Lógica com base na intenção
     switch (intentName) {
       case "Horários Disponíveis":
         try {
           const calendarId = "jurami.junior@gmail.com";
           const availableSlots = await getAvailableSlots(calendarId);
 
-          if (availableSlots.length === 0) {
-            responseText =
-              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-          } else {
-            responseText = `Os horários disponíveis são:\n${availableSlots
-              .map((s, i) => `${i + 1}) ${s}`)
-              .join(
-                "\n"
-              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta específica, responda com 0.`;
-          }
+          responseText =
+            availableSlots.length === 0
+              ? "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde."
+              : `Os horários disponíveis são:\n${availableSlots
+                  .map((s, i) => `${i + 1}) ${s}`)
+                  .join(
+                    "\n"
+                  )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta específica, responda com 0.`;
+
+          return void res.json({ fulfillmentText: responseText });
         } catch (error) {
           console.error("Erro ao obter horários:", error);
           responseText =
-            "Desculpe, ocorreu um erro ao obter os horários disponíveis. Tente novamente mais tarde.";
-        }
-        break;
-
-      case "Selecionar Horário": {
-        const slotNumber = req.body.queryResult.parameters?.number;
-
-        if (!slotNumber) {
-          responseText = "Por favor, informe um número válido para o horário.";
-          break;
+            "Erro ao obter os horários disponíveis. Tente novamente.";
+          return void res.json({ fulfillmentText: responseText });
         }
 
-        const slotIndex = parseInt(slotNumber) - 1;
-        const calendarId = "jurami.junior@gmail.com";
-        const availableSlots = await getAvailableSlots(calendarId);
-
-        if (slotIndex < 0 || slotIndex >= availableSlots.length) {
-          responseText =
-            "A escolha não é válida. Por favor, escolha um número da lista.";
-          break;
-        }
-
-        const selectedSlot = availableSlots[slotIndex];
-        console.log("Valor de selectedSlot:", selectedSlot);
-
-        // Converte para o formato ISO
-        const [datePart, timePart] = selectedSlot.split(" ");
-        const [day, month, year] = datePart.split("/");
-        const [hour, minute] = timePart.split(":");
-
-        const timeZone = "America/Sao_Paulo";
-        const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
-        const isoEndDateTime = `${year}-${month}-${day}T${String(
-          parseInt(hour, 10) + 1
-        ).padStart(2, "0")}:${minute}:00`;
-
-        const event = {
-          summary: "Consulta",
-          description: "Consulta médica agendada pelo sistema.",
-          start: { dateTime: isoStartDateTime, timeZone },
-          end: { dateTime: isoEndDateTime, timeZone },
-        };
-
+      case "Selecionar Horário":
         try {
-          await calendar.events.insert({
-            calendarId,
-            requestBody: event,
-          });
+          const slotNumber = parseInt(
+            req.body.queryResult?.parameters?.number,
+            10
+          );
+          const calendarId = "jurami.junior@gmail.com";
+          const availableSlots = await getAvailableSlots(calendarId);
+
+          if (
+            isNaN(slotNumber) ||
+            slotNumber < 1 ||
+            slotNumber > availableSlots.length
+          ) {
+            responseText = "Por favor, informe um número válido.";
+            return void res.json({ fulfillmentText: responseText });
+          }
+
+          const selectedSlot = availableSlots[slotNumber - 1];
+          console.log("Horário selecionado:", selectedSlot);
+
           responseText = `Consulta marcada com sucesso para ${selectedSlot}.`;
+          return void res.json({ fulfillmentText: responseText });
         } catch (error) {
-          console.error("Erro ao criar evento no Google Calendar:", error);
-          responseText =
-            "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
+          console.error("Erro ao selecionar horário:", error);
+          responseText = "Erro ao processar o horário selecionado.";
+          return void res.json({ fulfillmentText: responseText });
         }
-        break;
-      }
 
       case "Marcar Consulta":
         try {
           const calendarId = "jurami.junior@gmail.com";
 
-          // Obter o contexto e os dados da sessão (se houver)
+          const outputContexts = req.body.queryResult.outputContexts || [];
           const sessionContext =
-            req.body.queryResult.outputContexts.find((ctx: { name: string }) =>
+            outputContexts.find((ctx: { name: string }) =>
               ctx.name.endsWith("/session_vars")
             ) || {};
           const sessionVars = sessionContext.parameters || {};
 
-          // Se não houver progresso, listar horários disponíveis
           if (!sessionVars.step) {
             const availableSlots = await getAvailableSlots(calendarId);
-
             if (availableSlots.length === 0) {
               responseText =
                 "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-            } else {
-              sessionVars.slots = availableSlots.slice(0, 4); // Apenas 4 horários
-              sessionVars.step = "choose_slot";
-              responseText =
-                sessionVars.slots
-                  .map((s: string, i: number) => `${i + 1}) ${s}`)
-                  .join("\n") +
-                "\n\nPor favor, responda com o número do horário desejado.";
+              return void res.json({ fulfillmentText: responseText });
             }
+
+            sessionVars.slots = availableSlots.slice(0, 4);
+            sessionVars.step = "choose_slot";
+            responseText =
+              sessionVars.slots
+                .map((s: string, i: number) => `${i + 1}) ${s}`)
+                .join("\n") +
+              "\n\nPor favor, responda com o número do horário desejado.";
+
+            return void res.json({
+              fulfillmentText: responseText,
+              outputContexts: [
+                {
+                  name: `${req.body.session}/contexts/session_vars`,
+                  lifespanCount: 5,
+                  parameters: sessionVars,
+                },
+              ],
+            });
           }
-          // Capturar o número do horário escolhido
-          else if (sessionVars.step === "choose_slot") {
-            const slotNumber = parseInt(req.body.queryResult.queryText);
+
+          if (sessionVars.step === "choose_slot") {
+            const slotNumber = parseInt(req.body.queryResult.queryText, 10);
 
             if (
-              !slotNumber ||
+              isNaN(slotNumber) ||
               slotNumber < 1 ||
               slotNumber > sessionVars.slots.length
             ) {
               responseText = "Por favor, informe um número válido da lista.";
-            } else {
-              sessionVars.selectedSlot = sessionVars.slots[slotNumber - 1];
-              sessionVars.step = "ask_name";
-              responseText = "Qual é o seu nome?";
+              return void res.json({ fulfillmentText: responseText });
             }
-          }
-          // Capturar o nome do usuário
-          else if (sessionVars.step === "ask_name") {
-            sessionVars.name = req.body.queryResult.queryText;
-            sessionVars.step = "ask_email";
-            responseText = "Qual é o seu e-mail?";
-          }
-          // Capturar o e-mail do usuário
-          else if (sessionVars.step === "ask_email") {
-            sessionVars.email = req.body.queryResult.queryText;
-            sessionVars.step = "ask_phone";
-            responseText = "Qual é o seu número de telefone?";
-          }
-          // Capturar o telefone do usuário e pedir confirmação
-          else if (sessionVars.step === "ask_phone") {
-            sessionVars.phone = req.body.queryResult.queryText;
-            sessionVars.step = "confirm";
-            responseText = `Por favor, confirme os dados:\n\nNome: ${sessionVars.name}\nE-mail: ${sessionVars.email}\nTelefone: ${sessionVars.phone}\nData da consulta: ${sessionVars.selectedSlot}\n\nResponda com "Sim" para confirmar ou "Não" para cancelar.`;
-          }
-          // Confirmar a marcação ou cancelar
-          else if (sessionVars.step === "confirm") {
-            if (req.body.queryResult.queryText.toLowerCase() === "sim") {
-              const [datePart, timePart] = sessionVars.selectedSlot.split(" ");
-              const [day, month, year] = datePart.split("/");
-              const [hour, minute] = timePart.split(":");
 
-              const timeZone = "America/Sao_Paulo";
-              const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
-              const isoEndDateTime = `${year}-${month}-${day}T${String(
-                parseInt(hour, 10) + 1
-              ).padStart(2, "0")}:${minute}:00`;
+            sessionVars.selectedSlot = sessionVars.slots[slotNumber - 1];
+            sessionVars.step = "ask_name";
+            responseText = "Qual é o seu nome?";
 
-              const event = {
-                summary: "Consulta",
-                description: `Consulta agendada com ${sessionVars.name}.\nTelefone: ${sessionVars.phone}\nE-mail: ${sessionVars.email}`,
-                start: { dateTime: isoStartDateTime, timeZone },
-                end: { dateTime: isoEndDateTime, timeZone },
-              };
+            return void res.json({
+              fulfillmentText: responseText,
+              outputContexts: [
+                {
+                  name: `${req.body.session}/contexts/session_vars`,
+                  lifespanCount: 5,
+                  parameters: sessionVars,
+                },
+              ],
+            });
+          }
 
-              // Inserir evento no calendário
-              await calendar.events.insert({
-                calendarId,
-                requestBody: event,
-              });
-
-              responseText = `Consulta marcada com sucesso para ${sessionVars.selectedSlot}. Obrigado, ${sessionVars.name}!`;
-            } else {
+          if (sessionVars.step === "confirm") {
+            if (!sessionVars.selectedSlot) {
               responseText =
-                "Consulta cancelada. Se precisar, estou à disposição.";
+                "Houve um problema ao recuperar o horário selecionado. Tente novamente.";
+              return void res.json({ fulfillmentText: responseText });
             }
-            sessionVars.step = null; // Resetar o fluxo
-          }
 
-          // Enviar o contexto atualizado ao Dialogflow
-          res.json({
-            fulfillmentText: responseText,
-            outputContexts: [
-              {
-                name: `${req.body.session}/contexts/session_vars`,
-                lifespanCount: 5,
-                parameters: sessionVars,
-              },
-            ],
-          });
+            const [datePart, timePart] = sessionVars.selectedSlot.split(" ");
+            const [day, month, year] = datePart.split("/");
+            const [hour, minute] = timePart.split(":");
+
+            const timeZone = "America/Sao_Paulo";
+            const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
+            const isoEndDateTime = `${year}-${month}-${day}T${String(
+              parseInt(hour, 10) + 1
+            ).padStart(2, "0")}:${minute}:00`;
+
+            const event = {
+              summary: "Consulta",
+              description: `Consulta agendada com ${
+                sessionVars.name || "Nome não informado"
+              }.\nTelefone: ${
+                sessionVars.phone || "Telefone não informado"
+              }\nE-mail: ${sessionVars.email || "E-mail não informado"}`,
+              start: { dateTime: isoStartDateTime, timeZone },
+              end: { dateTime: isoEndDateTime, timeZone },
+            };
+
+            await calendar.events.insert({
+              calendarId,
+              requestBody: event,
+            });
+
+            responseText = `Consulta marcada com sucesso para ${
+              sessionVars.selectedSlot
+            }. Obrigado, ${sessionVars.name || ""}!`;
+
+            sessionVars.step = null;
+            return void res.json({
+              fulfillmentText: responseText,
+              outputContexts: [
+                {
+                  name: `${req.body.session}/contexts/session_vars`,
+                  lifespanCount: 0,
+                },
+              ],
+            });
+          }
         } catch (error) {
           console.error("Erro ao processar solicitação:", error);
           responseText =
             "Desculpe, ocorreu um erro no sistema. Por favor, tente novamente mais tarde.";
-          res.json({ fulfillmentText: responseText });
+          return void res.json({ fulfillmentText: responseText });
         }
         break;
 
       case "saudacoes_e_boas_vindas":
-        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
-        break;
-
-      case "introducao_alimentar":
-        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
-        break;
-
-      case "acompanhamento_gestante":
-        responseText = `Deixa eu te explicar como funciona o pré natal nutricional da Dra Sabrina \n\n A Dra Sabrina vai te ajudar a conduzir a sua gestação de forma saudável, mas sem complicar a sua rotina e sem mudanças radicais na sua alimentação.\n\n O foco do acompanhamento nutricional será no ganho de peso recomendado para o trimestre, no crescimento do bebê e na redução das chances de desenvolver complicações gestacionais. \n\n Além disso, ela prescreve toda a suplementação necessária durante a gestação, de acordo com o trimestre, com as necessidade da mamãe e do bebê, e sempre levando em consideração os resultados dos exames. \n\n Antes da primeira consulta será enviado um questionário, para que a Dra possa entender melhor as suas particularidades e, durante a consulta, consiga priorizar as questões mais importantes. \n\n Na primeira consulta, que dura em torno de 1h, ela vai te ouvir para poder entender a sua rotina e se aprofundar nas suas necessidades. \n\n Será aferido o seu peso, altura, circunferências e dobras cutâneas, para concluir seu Diagnóstico Nutricional e acompanhar a sua evolução de ganho de peso durante a gestação \n\n Pelos próximos 30 dias após a consulta, você conta com a facilidade de acessar todo o material da consulta (plano alimentar, receitas e prescrições, orientações, pedidos de exame, etc) pelo aplicativo da Dra. Sabrina.  \n\n O seu acompanhamento será feito pelo chat do app. Uma vez por semana durante os 30 dias, a Dra acessa o chat responder a todas as suas dúvidas. `;
-        break;
+        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\nMe conta como posso te ajudar?`;
+        return void res.json({ fulfillmentText: responseText });
 
       default:
         console.log("Enviando mensagem para o ChatGPT...");
-        const finalUserInput = req.body.queryResult.queryText;
-        console.log("Mensagem enviada:", finalUserInput);
-
         try {
           responseText = await getOpenAiCompletion(finalUserInput);
           console.log("Resposta do GPT:", responseText);
         } catch (error) {
           console.error("Erro ao buscar resposta do GPT:", error);
-          responseText = "Desculpe, ocorreu um erro ao processar sua mensagem.";
+          responseText = "Ocorreu um erro ao processar sua mensagem.";
         }
+        return void res.json({ fulfillmentText: responseText });
     }
-
-    res.json({
-      fulfillmentText: responseText,
-    });
   } catch (error) {
     console.error("Erro no Fulfillment:", error);
     if (!res.headersSent) {
-      res.status(500).send("Erro ao processar a intenção.");
+      return void res
+        .status(500)
+        .json({ fulfillmentText: "Erro ao processar a intenção." });
     }
   }
-});
+};
+
+// Rota do Express
+app.post("/fulfillment", fulfillmentHandler);
 
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
