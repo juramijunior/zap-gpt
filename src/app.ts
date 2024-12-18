@@ -39,9 +39,6 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
-const sessionUserMap: { [key: string]: string } = {};
-
-// Função para dividir mensagens longas
 function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   const partes: string[] = [];
   for (let i = 0; i < mensagem.length; i += tamanhoMax) {
@@ -50,7 +47,6 @@ function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   return partes;
 }
 
-// Função para buscar horários disponíveis
 async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
@@ -80,7 +76,6 @@ async function getAvailableSlots(
       let startHour = 0;
       let endHour = 0;
 
-      // Terça: 14-19, Quarta: 8-13
       if (dayOfWeek === 2) {
         startHour = 14;
         endHour = 19;
@@ -133,7 +128,6 @@ async function getAvailableSlots(
 app.post("/fulfillment", async (req: Request, res: Response) => {
   const intentName = req.body.queryResult.intent.displayName;
   const sessionPath: string = req.body.session || "";
-  const sessionId = sessionPath.split("/").pop() || "";
   const userQuery = req.body.queryResult.queryText;
   const audioUrl = req.body.originalDetectIntentRequest?.payload?.audioUrl;
 
@@ -142,7 +136,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   try {
     let finalUserInput = userQuery;
 
-    // Se houver um áudio, transcreve antes de processar
     if (audioUrl) {
       try {
         console.log("Áudio recebido. Iniciando transcrição...");
@@ -154,11 +147,13 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           "Não consegui entender o áudio enviado. Tente novamente.";
       }
     }
+
     switch (intentName) {
       case "Horários Disponíveis":
         try {
           const calendarId = "jurami.junior@gmail.com";
           const availableSlots = await getAvailableSlots(calendarId);
+
           if (availableSlots.length === 0) {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
@@ -167,7 +162,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
               .map((s, i) => `${i + 1}) ${s}`)
               .join(
                 "\n"
-              )}\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta específica, responda com 0.`;
+              )}\n\nPor favor, responda com o número do horário desejado.`;
           }
         } catch (error) {
           console.error("Erro ao obter horários:", error);
@@ -178,6 +173,12 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
       case "Selecionar Horário": {
         const slotNumber = req.body.queryResult.parameters?.number;
+
+        if (!slotNumber) {
+          responseText = "Por favor, informe um número válido para o horário.";
+          break;
+        }
+
         const slotIndex = parseInt(slotNumber) - 1;
         const calendarId = "jurami.junior@gmail.com";
         const availableSlots = await getAvailableSlots(calendarId);
@@ -204,14 +205,8 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const event = {
           summary: "Consulta",
           description: "Consulta médica agendada pelo sistema.",
-          start: {
-            dateTime: isoStartDateTime,
-            timeZone,
-          },
-          end: {
-            dateTime: isoEndDateTime,
-            timeZone,
-          },
+          start: { dateTime: isoStartDateTime, timeZone },
+          end: { dateTime: isoEndDateTime, timeZone },
         };
 
         try {
@@ -228,22 +223,39 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
+      case "Marcar Consulta":
+        try {
+          const calendarId = "jurami.junior@gmail.com";
+          const availableSlots = await getAvailableSlots(calendarId);
+
+          if (availableSlots.length === 0) {
+            responseText =
+              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+          } else {
+            responseText = `Os horários disponíveis são:\n${availableSlots
+              .map((s, i) => `${i + 1}) ${s}`)
+              .join(
+                "\n"
+              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
+          }
+        } catch (error) {
+          console.error("Erro ao buscar os horários disponíveis:", error);
+          responseText =
+            "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.";
+        }
+        break;
       case "saudacoes_e_boas_vindas":
-        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem.\n\nMe conta como podemos te ajudar❓`;
+        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
+        break;
+
+      case "introducao_alimentar":
+        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
         break;
 
       default:
         console.log("Enviando mensagem para o ChatGPT...");
-        console.log("Mensagem enviada:", finalUserInput || userQuery);
-
-        try {
-          // Chama o GPT para lidar com intenções desconhecidas
-          responseText = await getOpenAiCompletion(finalUserInput);
-        } catch (gptError) {
-          console.error("Erro ao processar com OpenAI:", gptError);
-          responseText =
-            "Desculpe, ocorreu um erro ao processar sua solicitação. Tente novamente mais tarde.";
-        }
+        responseText = await getOpenAiCompletion(finalUserInput);
+        break;
     }
 
     if (!res.headersSent) {
@@ -261,29 +273,22 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
-    if (
-      !req.body ||
-      (!req.body.From && !req.body.Body && !req.body.MediaUrl0)
-    ) {
+    if (!req.body || !req.body.From) {
       res.status(400).send("Requisição inválida.");
       return;
     }
 
     const fromNumber = req.body.From;
     const incomingMessage = req.body.Body || "";
-    const audioUrl = req.body.MediaUrl0; // URL do áudio enviado pelo Twilio
+    const audioUrl = req.body.MediaUrl0 || null;
     const sessionId = uuidv4();
-    const client = await auth.getClient();
-    const accessToken = await client.getAccessToken();
 
     let finalUserMessage = incomingMessage;
 
-    // Passo 1: Se o usuário enviou um áudio, faça a transcrição
     if (audioUrl) {
       try {
         console.log(`Áudio detectado. Transcrevendo áudio da URL: ${audioUrl}`);
         finalUserMessage = await transcribeAudio(audioUrl);
-        console.log(`Transcrição do áudio: ${finalUserMessage}`);
       } catch (error) {
         console.error("Erro ao transcrever o áudio:", error);
         res.status(500).send("Erro ao processar o áudio enviado.");
@@ -291,7 +296,6 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Passo 2: Enviar mensagem (ou transcrição) para o Dialogflow
     const dialogflowResponse = await axios.post(
       `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
       {
@@ -299,21 +303,20 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           text: { text: finalUserMessage, languageCode: "pt-BR" },
         },
       },
-      { headers: { Authorization: `Bearer ${accessToken.token}` } }
+      { headers: { Authorization: `Bearer ${authToken}` } }
     );
 
     const fullResponseMessage =
       dialogflowResponse.data.queryResult.fulfillmentText ||
       "Desculpe, não entendi.";
 
-    // Passo 3: Dividir mensagem e enviar pelo Twilio
-    const partesMensagem = dividirMensagem(fullResponseMessage);
-    for (const parte of partesMensagem) {
+    const responseParts = dividirMensagem(fullResponseMessage);
+    for (const part of responseParts) {
       const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
       const data = {
         To: fromNumber,
         From: `whatsapp:${twilioFromNumber}`,
-        Body: parte,
+        Body: part,
       };
 
       await axios.post(url, qs.stringify(data), {
