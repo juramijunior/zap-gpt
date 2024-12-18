@@ -96,6 +96,13 @@ async function getAvailableSlots(
       currentDate.setHours(startHour, 0, 0, 0);
 
       while (currentDate.getHours() < endHour) {
+        // Verificar se o horário é passado
+        const now = toZonedTime(new Date(), timeZone);
+        if (currentDate <= now) {
+          currentDate.setMinutes(currentDate.getMinutes() + timeIncrement);
+          continue;
+        }
+
         const isFree = !events.some((event) => {
           const eventStart = event.start?.dateTime
             ? toZonedTime(new Date(event.start.dateTime), timeZone)
