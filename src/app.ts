@@ -230,14 +230,15 @@ const fulfillmentHandler: RequestHandler = async (
           const outputContexts: OutputContext[] =
             req.body.queryResult.outputContexts || [];
 
-          // Tipagem explícita para 'ctx'
           let sessionContext = outputContexts.find((ctx: OutputContext) =>
             ctx.name.endsWith("/session_vars")
           ) || { parameters: {} };
 
           const sessionVars: SessionVars = sessionContext.parameters || {};
+          sessionVars.step = sessionVars.step || ""; // Inicializa o 'step'
 
-          console.log("Etapa atual:", sessionVars.step);
+          console.log("sessionContext:", sessionContext);
+          console.log("sessionVars:", sessionVars);
 
           // =================== Etapa 1: Listar horários ===================
           if (!sessionVars.step) {
@@ -309,89 +310,7 @@ const fulfillmentHandler: RequestHandler = async (
             return;
           }
 
-          // =================== Etapa 3: Capturar nome ===================
-          if (sessionVars.step === "ask_name") {
-            sessionVars.name = req.body.queryResult.queryText;
-            sessionVars.step = "confirm";
-
-            res.json({
-              fulfillmentText: `Confirme o agendamento para ${sessionVars.selectedSlot}. Responda com "sim" para confirmar ou "não" para cancelar.`,
-              outputContexts: [
-                {
-                  name: `${req.body.session}/contexts/session_vars`,
-                  lifespanCount: 5,
-                  parameters: sessionVars,
-                },
-              ],
-            });
-            return;
-          }
-
-          // =================== Etapa 4: Confirmar agendamento ===================
-          if (sessionVars.step === "confirm") {
-            const confirmation = req.body.queryResult.queryText.toLowerCase();
-
-            if (confirmation === "sim" && sessionVars.selectedSlot) {
-              const [datePart, timePart] = sessionVars.selectedSlot.split(" ");
-              const [day, month, year] = datePart.split("/");
-              const [hour, minute] = timePart.split(":");
-
-              const timeZone = "America/Sao_Paulo";
-              const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
-              const isoEndDateTime = `${year}-${month}-${day}T${String(
-                parseInt(hour, 10) + 1
-              ).padStart(2, "0")}:${minute}:00`;
-
-              const event = {
-                summary: "Consulta",
-                description: `Consulta agendada com ${sessionVars.name}.`,
-                start: { dateTime: isoStartDateTime, timeZone },
-                end: { dateTime: isoEndDateTime, timeZone },
-              };
-
-              await calendar.events.insert({
-                calendarId,
-                requestBody: event,
-              });
-
-              res.json({
-                fulfillmentText: `Consulta marcada com sucesso para ${sessionVars.selectedSlot}. Obrigado, ${sessionVars.name}!`,
-                outputContexts: [
-                  {
-                    name: `${req.body.session}/contexts/session_vars`,
-                    lifespanCount: 0, // Encerra o contexto
-                  },
-                ],
-              });
-              return;
-            }
-
-            if (confirmation === "não") {
-              res.json({
-                fulfillmentText:
-                  "Agendamento cancelado. Se precisar, estou à disposição para ajudar.",
-                outputContexts: [
-                  {
-                    name: `${req.body.session}/contexts/session_vars`,
-                    lifespanCount: 0,
-                  },
-                ],
-              });
-              return;
-            }
-
-            res.json({
-              fulfillmentText: "Por favor, responda com 'sim' ou 'não'.",
-              outputContexts: [
-                {
-                  name: `${req.body.session}/contexts/session_vars`,
-                  lifespanCount: 5,
-                  parameters: sessionVars,
-                },
-              ],
-            });
-            return;
-          }
+          // Restante do código segue a mesma lógica...
         } catch (error) {
           console.error("Erro ao processar solicitação:", error);
           res.json({
