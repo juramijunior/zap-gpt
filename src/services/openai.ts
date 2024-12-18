@@ -60,9 +60,15 @@ export const transcribeAudio = async (audioUrl: string): Promise<string> => {
     const audioResponse = await fetch(audioUrl);
     const audioBuffer = await audioResponse.buffer();
 
-    // Salva o áudio temporariamente
-    const inputPath = path.resolve("temp", "input.ogg");
-    const outputPath = path.resolve("temp", "output.mp3");
+    // Caminhos dos arquivos temporários
+    const tempDir = path.resolve("temp");
+    const inputPath = path.join(tempDir, "input.ogg");
+    const outputPath = path.join(tempDir, "output.mp3");
+
+    // Cria o diretório 'temp' se ele não existir
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
 
     fs.writeFileSync(inputPath, audioBuffer);
 
