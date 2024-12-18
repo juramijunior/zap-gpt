@@ -13,7 +13,7 @@ const openai = new OpenAI({
 export const getOpenAiCompletion = async (input: string): Promise<string> => {
   try {
     const temperature = 0.0; // Reduzido para zero para respostas determinísticas
-    const maxTokens = 200; // Limitar o tamanho da resposta
+    const maxTokens = 500; // Limitar o tamanho da resposta
     const model = process.env.OPENAI_FINE_TUNED_MODEL || "gpt-3.5-turbo"; // Usa modelo treinado, se definido
 
     const completion = await openai.chat.completions.create({
