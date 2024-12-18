@@ -227,6 +227,7 @@ const fulfillmentHandler: RequestHandler = async (
         try {
           const calendarId = "jurami.junior@gmail.com";
 
+          // Recuperar os contextos e sessionVars
           const outputContexts: OutputContext[] =
             req.body.queryResult.outputContexts || [];
           const sessionContext = outputContexts.find((ctx) =>
@@ -234,7 +235,9 @@ const fulfillmentHandler: RequestHandler = async (
           ) || { parameters: {} };
           const sessionVars: SessionVars = sessionContext.parameters || {};
 
-          // Primeira etapa: listar horários disponíveis
+          console.log("Etapa atual:", sessionVars.step); // Log da etapa atual
+
+          // Primeira etapa: Listar horários disponíveis
           if (!sessionVars.step) {
             const availableSlots = await getAvailableSlots(calendarId);
 
@@ -266,7 +269,7 @@ const fulfillmentHandler: RequestHandler = async (
             return;
           }
 
-          // Segunda etapa: usuário escolhe um horário
+          // Segunda etapa: Usuário escolhe o horário
           if (sessionVars.step === "choose_slot") {
             const slotNumber = parseInt(req.body.queryResult.queryText, 10);
 
@@ -288,16 +291,23 @@ const fulfillmentHandler: RequestHandler = async (
                   },
                 ],
               });
-            } else {
-              res.json({
-                fulfillmentText:
-                  "Por favor, informe um número válido da lista.",
-              });
+              return;
             }
+
+            res.json({
+              fulfillmentText: "Por favor, informe um número válido da lista.",
+              outputContexts: [
+                {
+                  name: `${req.body.session}/contexts/session_vars`,
+                  lifespanCount: 5,
+                  parameters: sessionVars,
+                },
+              ],
+            });
             return;
           }
 
-          // Terceira etapa: usuário informa o nome
+          // Terceira etapa: Usuário informa o nome
           if (sessionVars.step === "ask_name") {
             sessionVars.name = req.body.queryResult.queryText;
             sessionVars.step = "confirm";
@@ -315,7 +325,7 @@ const fulfillmentHandler: RequestHandler = async (
             return;
           }
 
-          // Quarta etapa: confirmação do agendamento
+          // Quarta etapa: Confirmação do agendamento
           if (sessionVars.step === "confirm") {
             const confirmation = req.body.queryResult.queryText.toLowerCase();
 
@@ -370,6 +380,13 @@ const fulfillmentHandler: RequestHandler = async (
 
             res.json({
               fulfillmentText: "Por favor, responda com 'sim' ou 'não'.",
+              outputContexts: [
+                {
+                  name: `${req.body.session}/contexts/session_vars`,
+                  lifespanCount: 5,
+                  parameters: sessionVars,
+                },
+              ],
             });
             return;
           }
@@ -381,6 +398,7 @@ const fulfillmentHandler: RequestHandler = async (
           });
         }
         break;
+
       case "saudacoes_e_boas_vindas":
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\nMe conta como posso te ajudar?`;
         return void res.json({ fulfillmentText: responseText });
