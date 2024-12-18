@@ -240,24 +240,115 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       case "Marcar Consulta":
         try {
           const calendarId = "jurami.junior@gmail.com";
-          const availableSlots = await getAvailableSlots(calendarId);
 
-          if (availableSlots.length === 0) {
-            responseText =
-              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-          } else {
-            // Limitar os horários aos 4 primeiros disponíveis
-            const limitedSlots = availableSlots.slice(0, 4);
-            responseText = `Os horários disponíveis são:\n${limitedSlots
-              .map((s, i) => `${i + 1} - ${s}`)
-              .join(
-                "\n"
-              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
+          // Obter o contexto e os dados da sessão (se houver)
+          const sessionContext =
+            req.body.queryResult.outputContexts.find((ctx: { name: string }) =>
+              ctx.name.endsWith("/session_vars")
+            ) || {};
+          const sessionVars = sessionContext.parameters || {};
+
+          // Se não houver progresso, listar horários disponíveis
+          if (!sessionVars.step) {
+            const availableSlots = await getAvailableSlots(calendarId);
+
+            if (availableSlots.length === 0) {
+              responseText =
+                "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+            } else {
+              sessionVars.slots = availableSlots.slice(0, 4); // Apenas 4 horários
+              sessionVars.step = "choose_slot";
+              responseText =
+                sessionVars.slots
+                  .map((s: string, i: number) => `${i + 1}) ${s}`)
+                  .join("\n") +
+                "\n\nPor favor, responda com o número do horário desejado.";
+            }
           }
+          // Capturar o número do horário escolhido
+          else if (sessionVars.step === "choose_slot") {
+            const slotNumber = parseInt(req.body.queryResult.queryText);
+
+            if (
+              !slotNumber ||
+              slotNumber < 1 ||
+              slotNumber > sessionVars.slots.length
+            ) {
+              responseText = "Por favor, informe um número válido da lista.";
+            } else {
+              sessionVars.selectedSlot = sessionVars.slots[slotNumber - 1];
+              sessionVars.step = "ask_name";
+              responseText = "Qual é o seu nome?";
+            }
+          }
+          // Capturar o nome do usuário
+          else if (sessionVars.step === "ask_name") {
+            sessionVars.name = req.body.queryResult.queryText;
+            sessionVars.step = "ask_email";
+            responseText = "Qual é o seu e-mail?";
+          }
+          // Capturar o e-mail do usuário
+          else if (sessionVars.step === "ask_email") {
+            sessionVars.email = req.body.queryResult.queryText;
+            sessionVars.step = "ask_phone";
+            responseText = "Qual é o seu número de telefone?";
+          }
+          // Capturar o telefone do usuário e pedir confirmação
+          else if (sessionVars.step === "ask_phone") {
+            sessionVars.phone = req.body.queryResult.queryText;
+            sessionVars.step = "confirm";
+            responseText = `Por favor, confirme os dados:\n\nNome: ${sessionVars.name}\nE-mail: ${sessionVars.email}\nTelefone: ${sessionVars.phone}\nData da consulta: ${sessionVars.selectedSlot}\n\nResponda com "Sim" para confirmar ou "Não" para cancelar.`;
+          }
+          // Confirmar a marcação ou cancelar
+          else if (sessionVars.step === "confirm") {
+            if (req.body.queryResult.queryText.toLowerCase() === "sim") {
+              const [datePart, timePart] = sessionVars.selectedSlot.split(" ");
+              const [day, month, year] = datePart.split("/");
+              const [hour, minute] = timePart.split(":");
+
+              const timeZone = "America/Sao_Paulo";
+              const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
+              const isoEndDateTime = `${year}-${month}-${day}T${String(
+                parseInt(hour, 10) + 1
+              ).padStart(2, "0")}:${minute}:00`;
+
+              const event = {
+                summary: "Consulta",
+                description: `Consulta agendada com ${sessionVars.name}.\nTelefone: ${sessionVars.phone}\nE-mail: ${sessionVars.email}`,
+                start: { dateTime: isoStartDateTime, timeZone },
+                end: { dateTime: isoEndDateTime, timeZone },
+              };
+
+              // Inserir evento no calendário
+              await calendar.events.insert({
+                calendarId,
+                requestBody: event,
+              });
+
+              responseText = `Consulta marcada com sucesso para ${sessionVars.selectedSlot}. Obrigado, ${sessionVars.name}!`;
+            } else {
+              responseText =
+                "Consulta cancelada. Se precisar, estou à disposição.";
+            }
+            sessionVars.step = null; // Resetar o fluxo
+          }
+
+          // Enviar o contexto atualizado ao Dialogflow
+          res.json({
+            fulfillmentText: responseText,
+            outputContexts: [
+              {
+                name: `${req.body.session}/contexts/session_vars`,
+                lifespanCount: 5,
+                parameters: sessionVars,
+              },
+            ],
+          });
         } catch (error) {
-          console.error("Erro ao buscar os horários disponíveis:", error);
+          console.error("Erro ao processar solicitação:", error);
           responseText =
-            "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.";
+            "Desculpe, ocorreu um erro no sistema. Por favor, tente novamente mais tarde.";
+          res.json({ fulfillmentText: responseText });
         }
         break;
 
