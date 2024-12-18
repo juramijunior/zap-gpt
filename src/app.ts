@@ -239,8 +239,10 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
           } else {
-            responseText = `Os horários disponíveis são:\n${availableSlots
-              .map((s, i) => `${i + 1}) ${s}`)
+            // Limitar os horários aos 4 primeiros disponíveis
+            const limitedSlots = availableSlots.slice(0, 4);
+            responseText = `Os horários disponíveis são:\n${limitedSlots
+              .map((s, i) => `${i + 1} - ${s}`)
               .join(
                 "\n"
               )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
