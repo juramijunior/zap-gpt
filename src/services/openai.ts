@@ -54,14 +54,24 @@ INSTRUÇÕES IMPORTANTES:
   }
 };
 
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
+
 export const transcribeAudio = async (audioUrl: string): Promise<string> => {
   try {
     console.log("Baixando o áudio...");
 
-    // Baixa o áudio como binário
-    const audioResponse = await fetch(audioUrl, {
-      headers: { Accept: "audio/ogg" },
+    // Cria a URL autenticada usando Account SID e Auth Token
+    const url = new URL(audioUrl);
+    const authHeader = `Basic ${Buffer.from(
+      `${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`
+    ).toString("base64")}`;
+
+    // Baixa o áudio com autenticação
+    const audioResponse = await fetch(url, {
+      headers: { Authorization: authHeader },
     });
+
     if (!audioResponse.ok) {
       throw new Error(`Erro ao baixar o áudio: ${audioResponse.statusText}`);
     }
@@ -82,11 +92,6 @@ export const transcribeAudio = async (audioUrl: string): Promise<string> => {
     fs.writeFileSync(inputPath, audioBuffer);
     console.log("Áudio salvo com sucesso.");
 
-    // Verifica se o arquivo baixado é válido
-    if (audioBuffer.length === 0) {
-      throw new Error("O arquivo de áudio está vazio.");
-    }
-
     // Converte o áudio para MP3
     console.log("Convertendo o áudio para MP3...");
     await new Promise<void>((resolve, reject) => {
@@ -95,8 +100,8 @@ export const transcribeAudio = async (audioUrl: string): Promise<string> => {
         .input(inputPath)
         .audioCodec("libmp3lame")
         .toFormat("mp3")
-        .on("end", () => resolve())
-        .on("error", (error) => reject(`Erro ao converter o áudio: ${error}`))
+        .on("end", () => resolve()) // Função vazia que respeita o tipo `() => void`
+        .on("error", reject)
         .save(outputPath);
     });
 
