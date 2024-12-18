@@ -223,27 +223,15 @@ const fulfillmentHandler: RequestHandler = async (
           return void res.json({ fulfillmentText: responseText });
         }
 
-        interface OutputContext {
-          name: string;
-          lifespanCount?: number;
-          parameters?: { [key: string]: any };
-        }
-
-        interface SessionVars {
-          step?: string; // Etapa atual
-          slots?: string[]; // Lista de horários
-          selectedSlot?: string; // Horário escolhido
-          name?: string; // Nome do usuário
-        }
-
       case "Marcar Consulta":
         try {
           const calendarId = "jurami.junior@gmail.com";
 
-          // Recuperar os contextos e sessionVars
           const outputContexts: OutputContext[] =
             req.body.queryResult.outputContexts || [];
-          let sessionContext = outputContexts.find((ctx) =>
+
+          // Tipagem explícita para 'ctx'
+          let sessionContext = outputContexts.find((ctx: OutputContext) =>
             ctx.name.endsWith("/session_vars")
           ) || { parameters: {} };
 
@@ -371,7 +359,7 @@ const fulfillmentHandler: RequestHandler = async (
                 outputContexts: [
                   {
                     name: `${req.body.session}/contexts/session_vars`,
-                    lifespanCount: 0, // Contexto encerra
+                    lifespanCount: 0, // Encerra o contexto
                   },
                 ],
               });
