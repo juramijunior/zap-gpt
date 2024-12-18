@@ -239,11 +239,47 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
           } else {
-            responseText = `Os horários disponíveis são:\n${availableSlots
-              .map((s, i) => `${i + 1}) ${s}`)
-              .join(
-                "\n"
-              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
+            // Gerar botões interativos com até 3 opções de horários
+            const buttons = availableSlots.slice(0, 3).map((slot, index) => ({
+              type: "reply",
+              reply: {
+                id: `slot_${index + 1}`,
+                title: slot, // Exibe o horário diretamente
+              },
+            }));
+
+            const interactiveMessage = {
+              type: "interactive",
+              interactive: {
+                type: "button",
+                body: {
+                  text: "Os horários disponíveis são:",
+                },
+                action: { buttons },
+              },
+            };
+
+            // Enviar via Twilio API
+            const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+
+            await axios.post(
+              url,
+              qs.stringify({
+                To: req.body.originalDetectIntentRequest.payload.source.from,
+                From: `whatsapp:${twilioFromNumber}`,
+                ContentType: "application/json",
+                Content: JSON.stringify(interactiveMessage),
+              }),
+              {
+                auth: { username: accountSid || "", password: authToken || "" },
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+              }
+            );
+
+            responseText =
+              "Por favor, escolha um horário clicando em um dos botões.";
           }
         } catch (error) {
           console.error("Erro ao buscar os horários disponíveis:", error);
