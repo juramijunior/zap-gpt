@@ -253,11 +253,16 @@ const fulfillmentHandler: RequestHandler = async (
             }
 
             sessionVars.slots = availableSlots.slice(0, 4);
-            sessionVars.step = "choose_slot";
+            sessionVars.step = "choose_slot"; // Atualiza o step
 
             const slotOptions = sessionVars.slots
               .map((slot, index) => `${index + 1}) ${slot}`)
               .join("\n");
+
+            console.log(
+              "Enviando sessionVars:",
+              JSON.stringify(sessionVars, null, 2)
+            ); // Validação
 
             res.json({
               fulfillmentText: `${slotOptions}\n\nPor favor, escolha o número do horário desejado.`,
@@ -265,7 +270,7 @@ const fulfillmentHandler: RequestHandler = async (
                 {
                   name: `${req.body.session}/contexts/session_vars`,
                   lifespanCount: 5,
-                  parameters: sessionVars,
+                  parameters: { ...sessionVars }, // Garante que o objeto é enviado
                 },
               ],
             });
