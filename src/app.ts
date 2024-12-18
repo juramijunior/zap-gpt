@@ -271,17 +271,21 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
       default:
         console.log("Enviando mensagem para o ChatGPT...");
+        const finalUserInput = req.body.queryResult.queryText;
         console.log("Mensagem enviada:", finalUserInput);
 
-        responseText = await getOpenAiCompletion(finalUserInput);
-        console.log("Resposta do GPT:", responseText);
+        try {
+          responseText = await getOpenAiCompletion(finalUserInput);
+          console.log("Resposta do GPT:", responseText);
+        } catch (error) {
+          console.error("Erro ao buscar resposta do GPT:", error);
+          responseText = "Desculpe, ocorreu um erro ao processar sua mensagem.";
+        }
     }
 
-    if (!res.headersSent) {
-      res.json({
-        fulfillmentText: responseText,
-      });
-    }
+    res.json({
+      fulfillmentText: responseText,
+    });
   } catch (error) {
     console.error("Erro no Fulfillment:", error);
     if (!res.headersSent) {
