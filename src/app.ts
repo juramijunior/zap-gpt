@@ -227,22 +227,26 @@ const fulfillmentHandler: RequestHandler = async (
         try {
           const calendarId = "jurami.junior@gmail.com";
 
+          // Recuperar o contexto e os parâmetros
           const outputContexts = req.body.queryResult.outputContexts || [];
           let sessionContext = outputContexts.find((ctx: any) =>
             ctx.name.endsWith("/session_vars")
-          ) || { parameters: {} };
+          ) || {
+            name: `${req.body.session}/contexts/session_vars`,
+            lifespanCount: 5,
+            parameters: {},
+          };
 
           const sessionVars: SessionVars = sessionContext.parameters || {};
           sessionVars.step = sessionVars.step || "";
 
-          console.log("Parâmetros recebidos no Webhook:", sessionVars);
+          console.log("Parâmetros recebidos:", sessionVars);
 
           // =================== Etapa 1: Listar horários ===================
           if (!sessionVars.step) {
             const availableSlots = await getAvailableSlots(calendarId);
 
             if (!availableSlots || availableSlots.length === 0) {
-              console.log("Sem horários disponíveis.");
               res.json({
                 fulfillmentText:
                   "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.",
@@ -257,12 +261,11 @@ const fulfillmentHandler: RequestHandler = async (
               .map((slot, index) => `${index + 1}) ${slot}`)
               .join("\n");
 
-            console.log("Enviando horários disponíveis...");
             res.json({
               fulfillmentText: `${slotOptions}\n\nPor favor, escolha o número do horário desejado.`,
               outputContexts: [
                 {
-                  name: `${req.body.session}/contexts/session_vars`,
+                  name: sessionContext.name,
                   lifespanCount: 5,
                   parameters: { ...sessionVars, step: "choose_slot" },
                 },
@@ -273,26 +276,18 @@ const fulfillmentHandler: RequestHandler = async (
 
           // =================== Etapa 2: Escolher horário ===================
           if (sessionVars.step === "choose_slot") {
+            sessionVars.slots = sessionVars.slots || []; // Garante que 'slots' é um array válido
+
             const userInput = req.body.queryResult.queryText.trim();
             const slotNumber = parseInt(userInput, 10);
 
-            console.log(
-              "Entrada do usuário:",
-              userInput,
-              "Número validado:",
-              slotNumber
-            );
-
             if (
-              sessionVars.slots &&
               !isNaN(slotNumber) &&
               slotNumber > 0 &&
               slotNumber <= sessionVars.slots.length
             ) {
               sessionVars.selectedSlot = sessionVars.slots[slotNumber - 1];
               sessionVars.step = "ask_name";
-
-              console.log("Horário selecionado:", sessionVars.selectedSlot);
 
               res.json({
                 fulfillmentText: "Qual é o seu nome?",
@@ -307,25 +302,23 @@ const fulfillmentHandler: RequestHandler = async (
               return;
             }
 
-            console.log("Entrada inválida.");
             res.json({
               fulfillmentText: "Por favor, informe um número válido da lista.",
             });
             return;
           }
 
-          // =================== Etapa 3: Capturar nome ===================
+          // =================== Etapa 3: Capturar o nome ===================
           if (sessionVars.step === "ask_name") {
-            sessionVars.name = req.body.queryResult.queryText;
+            const userName = req.body.queryResult.queryText.trim();
+            sessionVars.name = userName;
             sessionVars.step = "confirm";
 
-            console.log("Nome capturado:", sessionVars.name);
-
             res.json({
-              fulfillmentText: `Confirme o agendamento para ${sessionVars.selectedSlot}. Responda com "sim" para confirmar ou "não" para cancelar.`,
+              fulfillmentText: `Confirme o agendamento para ${sessionVars.selectedSlot}, ${sessionVars.name}. Responda com "sim" para confirmar ou "não" para cancelar.`,
               outputContexts: [
                 {
-                  name: `${req.body.session}/contexts/session_vars`,
+                  name: sessionContext.name,
                   lifespanCount: 5,
                   parameters: { ...sessionVars, step: "confirm" },
                 },
@@ -334,21 +327,27 @@ const fulfillmentHandler: RequestHandler = async (
             return;
           }
 
-          // =================== Etapa 4: Confirmar agendamento ===================
+          // =================== Etapa 4: Confirmação ===================
           if (sessionVars.step === "confirm") {
-            const confirmation = req.body.queryResult.queryText.toLowerCase();
+            const confirmation = req.body.queryResult.queryText
+              .trim()
+              .toLowerCase();
 
             if (confirmation === "sim" && sessionVars.selectedSlot) {
+              const selectedSlot = sessionVars.selectedSlot;
+
               console.log(
-                "Agendamento confirmado para:",
-                sessionVars.selectedSlot
+                "Consulta confirmada para:",
+                selectedSlot,
+                "Nome:",
+                sessionVars.name
               );
 
               res.json({
-                fulfillmentText: `Consulta marcada com sucesso para ${sessionVars.selectedSlot}. Obrigado, ${sessionVars.name}!`,
+                fulfillmentText: `Consulta marcada com sucesso para ${selectedSlot}. Obrigado, ${sessionVars.name}!`,
                 outputContexts: [
                   {
-                    name: `${req.body.session}/contexts/session_vars`,
+                    name: sessionContext.name,
                     lifespanCount: 0,
                   },
                 ],
@@ -357,13 +356,12 @@ const fulfillmentHandler: RequestHandler = async (
             }
 
             if (confirmation === "não") {
-              console.log("Agendamento cancelado.");
               res.json({
                 fulfillmentText:
                   "Agendamento cancelado. Se precisar, estou à disposição para ajudar.",
                 outputContexts: [
                   {
-                    name: `${req.body.session}/contexts/session_vars`,
+                    name: sessionContext.name,
                     lifespanCount: 0,
                   },
                 ],
@@ -371,9 +369,16 @@ const fulfillmentHandler: RequestHandler = async (
               return;
             }
 
-            console.log("Entrada inválida na confirmação.");
             res.json({
-              fulfillmentText: "Por favor, responda com 'sim' ou 'não'.",
+              fulfillmentText:
+                "Por favor, responda com 'sim' para confirmar ou 'não' para cancelar.",
+              outputContexts: [
+                {
+                  name: sessionContext.name,
+                  lifespanCount: 5,
+                  parameters: { ...sessionVars },
+                },
+              ],
             });
             return;
           }
