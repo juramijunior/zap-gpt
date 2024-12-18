@@ -47,3 +47,28 @@ INSTRUÇÕES IMPORTANTES:
     throw new Error("Não foi possível receber o texto");
   }
 };
+
+export const transcribeAudio = async (audioUrl: string): Promise<string> => {
+  try {
+    // Baixa o áudio
+    const audioResponse = await fetch(audioUrl);
+    const audioBuffer = await audioResponse.arrayBuffer();
+
+    // Converte Blob em File
+    const audioFile = new File([audioBuffer], "audio.mp3", {
+      type: "audio/mpeg",
+    });
+
+    // Transcrição com Whisper
+    const transcription = await openai.audio.transcriptions.create({
+      file: audioFile,
+      model: "whisper-1",
+      language: "pt", // Define o idioma português
+    });
+
+    return transcription.text;
+  } catch (error) {
+    console.error("Erro ao transcrever o áudio:", error);
+    throw new Error("Não foi possível processar o áudio enviado.");
+  }
+};
