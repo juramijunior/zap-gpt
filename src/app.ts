@@ -186,30 +186,58 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
 
       case "Selecionar Horário": {
+        console.log("Iniciando a intent Selecionar Horário...");
+
         const slotNumber = req.body.queryResult.parameters?.number;
         const nome = req.body.queryResult.parameters?.nome;
         const email = req.body.queryResult.parameters?.email;
         const telefone = req.body.queryResult.parameters?.telefone;
 
+        console.log("Parâmetros recebidos:");
+        console.log("Nome:", nome);
+        console.log("E-mail:", email);
+        console.log("Telefone:", telefone);
+        console.log("Número do horário selecionado:", slotNumber);
+
+        const calendarId = "jurami.junior@gmail.com";
+
+        // Adicione aqui a chamada para `getAvailableSlots` e atribua à variável `availableSlots`
+        const availableSlots = await getAvailableSlots(calendarId);
+
+        console.log("Horários disponíveis:", availableSlots);
+
         if (!slotNumber) {
-          responseText = "Por favor, informe um número válido para o horário.";
+          // Limitar a 5 horários
+          const limitedSlots = availableSlots.slice(0, 5);
+
+          let responseText = "Os horários disponíveis são:\n\n";
+          limitedSlots.forEach((slot, index) => {
+            responseText += `${index + 1}. ${slot}\n`;
+          });
+
+          responseText +=
+            "\n\nPor favor, escolha o número do horário desejado.";
+          console.log("Mensagem de resposta:", responseText);
+
+          res.json({
+            fulfillmentText: responseText,
+          });
           break;
         }
 
         const slotIndex = parseInt(slotNumber) - 1;
-        const calendarId = "jurami.junior@gmail.com";
-        const availableSlots = await getAvailableSlots(calendarId);
 
         if (slotIndex < 0 || slotIndex >= availableSlots.length) {
           responseText =
             "A escolha não é válida. Por favor, escolha um número da lista.";
+          console.log("Erro: Horário inválido. Índice selecionado:", slotIndex);
           break;
         }
 
         const selectedSlot = availableSlots[slotIndex];
-        console.log("Valor de selectedSlot:", selectedSlot);
+        console.log("Horário selecionado:", selectedSlot);
 
-        // Converte para o formato ISO
+        // Converter horário selecionado para formato ISO
         const [datePart, timePart] = selectedSlot.split(" ");
         const [day, month, year] = datePart.split("/");
         const [hour, minute] = timePart.split(":");
@@ -220,24 +248,39 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           parseInt(hour, 10) + 1
         ).padStart(2, "0")}:${minute}:00`;
 
+        console.log("ISO Start DateTime:", isoStartDateTime);
+        console.log("ISO End DateTime:", isoEndDateTime);
+
+        // Criar o evento com informações do cliente
         const event = {
           summary: `Consulta com ${nome}`,
-          description: `Consulta médica agendada pelo sistema.\n\nDetalhes do cliente:\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
+          description: `Detalhes da consulta:\n\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
           start: { dateTime: isoStartDateTime, timeZone },
           end: { dateTime: isoEndDateTime, timeZone },
         };
 
+        console.log("Criando evento no Google Calendar...");
+        console.log("Evento:", event);
+
         try {
-          await calendar.events.insert({
+          // Inserir o evento no Google Calendar
+          const result = await calendar.events.insert({
             calendarId,
             requestBody: event,
           });
+          console.log(
+            "Evento criado com sucesso no Google Calendar:",
+            result.data
+          );
+
           responseText = `Consulta marcada com sucesso para ${selectedSlot}. Cliente: ${nome}.`;
         } catch (error) {
           console.error("Erro ao criar evento no Google Calendar:", error);
           responseText =
             "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
         }
+
+        console.log("Finalizando a intent Selecionar Horário...");
         break;
       }
 
