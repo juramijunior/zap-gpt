@@ -186,158 +186,75 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
 
       case "Selecionar Horário": {
-        const slotNumber = req.body.queryResult.parameters?.number;
-        const nome = req.body.queryResult.parameters?.nome;
-        const email = req.body.queryResult.parameters?.email;
-        const telefone = req.body.queryResult.parameters?.telefone;
+        console.log("Iniciando a intenção Selecionar Horário...");
+
+        // Declara o tipo dos contextos
+        const context = req.body.queryResult.outputContexts.find(
+          (c: { name: string; parameters: any }) =>
+            c.name.includes("marcar_consulta_context")
+        );
+
+        const slotNumber =
+          req.body.queryResult.parameters?.number ||
+          context?.parameters?.number;
+
+        console.log("Número do horário selecionado:", slotNumber);
 
         if (!slotNumber) {
-          responseText = "Por favor, informe um número válido para o horário.";
-          break;
-        }
-
-        const slotIndex = parseInt(slotNumber) - 1;
-        const calendarId = "jurami.junior@gmail.com";
-        const availableSlots = await getAvailableSlots(calendarId);
-
-        if (slotIndex < 0 || slotIndex >= availableSlots.length) {
-          responseText =
-            "A escolha não é válida. Por favor, escolha um número da lista.";
-          break;
-        }
-
-        const selectedSlot = availableSlots[slotIndex];
-        console.log("Valor de selectedSlot:", selectedSlot);
-
-        // Converte para o formato ISO
-        const [datePart, timePart] = selectedSlot.split(" ");
-        const [day, month, year] = datePart.split("/");
-        const [hour, minute] = timePart.split(":");
-
-        const timeZone = "America/Sao_Paulo";
-        const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
-        const isoEndDateTime = `${year}-${month}-${day}T${String(
-          parseInt(hour, 10) + 1
-        ).padStart(2, "0")}:${minute}:00`;
-
-        const event = {
-          summary: `Consulta com ${nome}`,
-          description: `Consulta médica agendada pelo sistema.\n\nDetalhes do cliente:\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
-          start: { dateTime: isoStartDateTime, timeZone },
-          end: { dateTime: isoEndDateTime, timeZone },
-        };
-
-        try {
-          await calendar.events.insert({
-            calendarId,
-            requestBody: event,
+          res.json({
+            fulfillmentText: "Por favor, informe o número do horário desejado.",
           });
-          responseText = `Consulta marcada com sucesso para ${selectedSlot}. Cliente: ${nome}.`;
-        } catch (error) {
-          console.error("Erro ao criar evento no Google Calendar:", error);
-          responseText =
-            "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
+          break;
         }
+
+        res.json({
+          fulfillmentText: `Número ${slotNumber} registrado com sucesso. Por favor, informe o seu nome.`,
+        });
         break;
       }
 
       case "Marcar Consulta": {
         console.log("Iniciando a intenção Marcar Consulta...");
 
-        // Captura os parâmetros
-        const slotNumber = req.body.queryResult.parameters?.number;
-        const nome = req.body.queryResult.parameters?.nome;
-        const email = req.body.queryResult.parameters?.email;
-        const telefone = req.body.queryResult.parameters?.telefone;
+        // Captura o número do horário (se fornecido)
+        const slotNumber = req.body.queryResult.parameters?.number || null;
 
-        console.log("Parâmetros recebidos:");
-        console.log("Número do horário selecionado:", slotNumber);
-        console.log("Nome:", nome);
-        console.log("E-mail:", email);
-        console.log("Telefone:", telefone);
+        const calendarId = "jurami.junior@gmail.com";
+        const availableSlots = await getAvailableSlots(calendarId);
 
-        try {
-          const calendarId = "jurami.junior@gmail.com";
-          const availableSlots = await getAvailableSlots(calendarId);
-
-          if (availableSlots.length === 0) {
-            responseText =
-              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-            console.log("Nenhum horário disponível.");
-            res.json({ fulfillmentText: responseText });
-            break;
-          }
-
-          if (!slotNumber) {
-            // Exibe os horários disponíveis e solicita o número
-            let responseText = `Os horários disponíveis são:\n${availableSlots
-              .map((s, i) => `${i + 1}) ${s}`)
-              .join(
-                "\n"
-              )}\n\nPor favor, responda com o número do horário desejado.`;
-            console.log("Mensagem de horários disponíveis:", responseText);
-
-            res.json({ fulfillmentText: responseText });
-            break;
-          }
-
-          // Processa a seleção do número
-          const slotIndex = parseInt(slotNumber) - 1;
-
-          if (slotIndex < 0 || slotIndex >= availableSlots.length) {
-            responseText =
-              "A escolha não é válida. Por favor, escolha um número da lista.";
-            console.log("Erro: Número inválido selecionado:", slotNumber);
-            res.json({ fulfillmentText: responseText });
-            break;
-          }
-
-          const selectedSlot = availableSlots[slotIndex];
-          console.log("Horário selecionado:", selectedSlot);
-
-          // Converte o horário selecionado para o formato ISO
-          const [datePart, timePart] = selectedSlot.split(" ");
-          const [day, month, year] = datePart.split("/");
-          const [hour, minute] = timePart.split(":");
-          const timeZone = "America/Sao_Paulo";
-          const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
-          const isoEndDateTime = `${year}-${month}-${day}T${String(
-            parseInt(hour, 10) + 1
-          ).padStart(2, "0")}:${minute}:00`;
-
-          const event = {
-            summary: `Consulta com ${nome}`,
-            description: `Consulta marcada automaticamente.\n\nDetalhes do cliente:\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
-            start: { dateTime: isoStartDateTime, timeZone },
-            end: { dateTime: isoEndDateTime, timeZone },
-          };
-
-          try {
-            const result = await calendar.events.insert({
-              calendarId,
-              requestBody: event,
-            });
-            console.log(
-              "Evento criado com sucesso no Google Calendar:",
-              result.data
-            );
-
-            responseText = `Consulta marcada com sucesso para ${selectedSlot}.`;
-          } catch (error) {
-            console.error("Erro ao criar evento no Google Calendar:", error);
-            responseText =
-              "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente.";
-          }
-
-          res.json({ fulfillmentText: responseText });
-        } catch (error) {
-          console.error("Erro ao buscar os horários disponíveis:", error);
+        if (availableSlots.length === 0) {
           res.json({
             fulfillmentText:
-              "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.",
+              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.",
           });
+          break;
         }
 
+        if (!slotNumber) {
+          // Exibe os horários disponíveis
+          let responseText = `Os horários disponíveis são:\n${availableSlots
+            .map((s, i) => `${i + 1}) ${s}`)
+            .join(
+              "\n"
+            )}\n\nPor favor, responda com o número do horário desejado.`;
+          console.log("Mensagem de horários disponíveis:", responseText);
+
+          // Envia a lista de horários e define o contexto de saída
+          res.json({
+            fulfillmentText: responseText,
+            outputContexts: [
+              {
+                name: `${req.body.session}/contexts/marcar_consulta_context`,
+                lifespanCount: 5,
+                parameters: { availableSlots }, // Armazena os horários disponíveis
+              },
+            ],
+          });
+          break;
+        }
+
+        console.log("Número do horário já recebido:", slotNumber);
+        // Continue com o fluxo...
         break;
       }
 
