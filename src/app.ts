@@ -140,6 +140,7 @@ async function getAvailableSlots(
 
 app.post("/fulfillment", async (req: Request, res: Response) => {
   const intentName = req.body.queryResult.intent.displayName;
+  console.log(`Intent recebida: ${intentName}`);
   const sessionPath: string = req.body.session || "";
   const sessionId = sessionPath.split("/").pop() || "";
   const userQuery = req.body.queryResult.queryText;
@@ -342,6 +343,7 @@ interface SessionVars {
 function handleMarcarConsulta(req: DialogflowRequest, res: Response) {
   // Supondo que você já tenha uma função para obter as opções
   const opcoes = getAvailableOptions(); // Retorna array de objetos com data e hora
+  console.log("Opções disponíveis:", opcoes);
 
   let responseText =
     "Por favor, escolha uma das opções abaixo digitando o número correspondente:\n";
@@ -383,6 +385,7 @@ function handleEscolherOpcao(req: DialogflowRequest, res: Response) {
   );
 
   if (!context) {
+    console.log('Contexto "awaiting-option" não encontrado.');
     res
       .status(400)
       .json({ error: "Contexto 'collected-option' não encontrado." });
@@ -391,6 +394,7 @@ function handleEscolherOpcao(req: DialogflowRequest, res: Response) {
   const opcoes = context.parameters.opcoes;
 
   const selectedOptionNumber = parseInt(req.body.queryResult.parameters.option);
+  console.log(`Opção selecionada pelo usuário: ${selectedOptionNumber}`);
 
   if (
     isNaN(selectedOptionNumber) ||
@@ -404,6 +408,9 @@ function handleEscolherOpcao(req: DialogflowRequest, res: Response) {
   }
 
   const selectedOption = opcoes[selectedOptionNumber - 1];
+  console.log(
+    `Opção válida selecionada: ${selectedOption.data} às ${selectedOption.hora}`
+  );
 
   // Armazenar a opção selecionada no contexto
   res.json({
