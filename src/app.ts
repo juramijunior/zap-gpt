@@ -242,7 +242,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           console.log("Erro: Número inválido selecionado:", slotNumber);
           res.json({
             fulfillmentText:
-              "A escolha não é válida. Por favor, escolha um número da lista ou 0 para cadastrar manualmente.",
+              "A esolha não é válida. Por favor, escolha um número da lista ou 0 para cadastrar manualmente.",
           });
           break;
         }
