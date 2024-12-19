@@ -218,10 +218,9 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
         const availableSlots = [
           "24/12/2024 15:00",
-          "24/12/2024 17:00",
+          "25/12/2024 17:00",
           "25/12/2024 08:00",
         ];
-
         res.json({
           fulfillmentText: `Os horários disponíveis são:\n${availableSlots
             .map((s, i) => `${i + 1}) ${s}`)
@@ -237,9 +236,13 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
-      case "Marcar Consulta - Capturar Número": {
-        console.log("Iniciando a intenção Capturar Número...");
+      case "Default Fallback Intent": {
+        console.log(
+          "Fallback acionado. Verificando se o cliente digitou um número..."
+        );
 
+        // Verifica se o texto é um número
+        const userInput = req.body.queryResult.queryText;
         const context = req.body.queryResult.outputContexts.find(
           (c: {
             name: string;
@@ -248,27 +251,54 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           }) => c.name.includes("marcar_consulta_context")
         );
 
-        const availableSlots = context?.parameters?.availableSlots || [];
-        const slotNumber = req.body.queryResult.parameters?.number;
-
-        if (!slotNumber) {
+        if (!context) {
+          console.log("Contexto 'marcar_consulta_context' não encontrado.");
           res.json({
             fulfillmentText:
-              "Por favor, informe um número válido para o horário desejado.",
+              "Não entendi sua solicitação. Por favor, tente novamente.",
           });
           break;
         }
 
-        if (slotNumber < 1 || slotNumber > availableSlots.length) {
+        const availableSlots = context.parameters?.availableSlots || [];
+
+        if (!isNaN(userInput)) {
+          const slotNumber = parseInt(userInput, 10);
+
+          if (slotNumber > 0 && slotNumber <= availableSlots.length) {
+            console.log("Número válido identificado:", slotNumber);
+
+            const selectedSlot = availableSlots[slotNumber - 1];
+
+            // Dispara o evento para a próxima intenção
+            res.json({
+              followupEventInput: {
+                name: "CAPTURAR_NUMERO_HORARIO",
+                languageCode: "pt-br",
+                parameters: {
+                  selectedSlot,
+                },
+              },
+            });
+          } else {
+            res.json({
+              fulfillmentText:
+                "Número inválido. Por favor, escolha um número da lista exibida.",
+            });
+          }
+        } else {
           res.json({
             fulfillmentText:
-              "Número inválido. Por favor, escolha um número da lista exibida.",
+              "Não entendi sua solicitação. Por favor, tente novamente.",
           });
-          break;
         }
+        break;
+      }
 
-        const selectedSlot = availableSlots[slotNumber - 1];
-        console.log("Horário selecionado:", selectedSlot);
+      case "Marcar Consulta - Capturar Número": {
+        console.log("Intenção acionada via evento para Capturar Número...");
+
+        const selectedSlot = req.body.queryResult.parameters?.selectedSlot;
 
         res.json({
           fulfillmentText: `Horário ${selectedSlot} selecionado. Por favor, informe o seu nome.`,
@@ -282,7 +312,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         });
         break;
       }
-
       case "saudacoes_e_boas_vindas":
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
         break;
