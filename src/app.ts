@@ -258,6 +258,97 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
+      case "Marcar Consulta - Capturar E-mail": {
+        console.log(
+          "Iniciando a intenção final para criar o evento no Google Agenda..."
+        );
+
+        // Recuperar o contexto com os dados necessários
+        const context = req.body.queryResult.outputContexts.find(
+          (c: { name: string; parameters: any }) =>
+            c.name.includes("marcar_consulta_context")
+        );
+
+        const selectedSlot = context?.parameters?.selectedSlot; // Horário selecionado
+        const nome = req.body.queryResult.parameters?.nome; // Nome do cliente
+        const telefone = req.body.queryResult.parameters?.telefone; // Telefone
+        const email = req.body.queryResult.parameters?.email; // E-mail
+
+        // Validar se todos os dados estão presentes
+        if (!selectedSlot || !nome || !telefone || !email) {
+          res.json({
+            fulfillmentText:
+              "Erro: dados insuficientes para marcar a consulta. Por favor, tente novamente.",
+          });
+          break;
+        }
+
+        console.log("Dados recebidos:");
+        console.log("Horário:", selectedSlot);
+        console.log("Nome:", nome);
+        console.log("Telefone:", telefone);
+        console.log("E-mail:", email);
+
+        // Converte o horário selecionado para o formato ISO 8601
+        const [datePart, timePart] = selectedSlot.split(" ");
+        const [day, month, year] = datePart.split("/");
+        const [hour, minute] = timePart.split(":");
+        const timeZone = "America/Sao_Paulo";
+        const startDateTime = new Date(
+          `${year}-${month}-${day}T${hour}:${minute}:00`
+        );
+        const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // Adiciona 1 hora ao horário de início
+
+        // Configurar o evento do Google Agenda
+        const event = {
+          summary: `Consulta com ${nome}`,
+          description: `Detalhes do cliente:\nNome: ${nome}\nTelefone: ${telefone}\nE-mail: ${email}`,
+          start: {
+            dateTime: startDateTime.toISOString(),
+            timeZone: timeZone,
+          },
+          end: {
+            dateTime: endDateTime.toISOString(),
+            timeZone: timeZone,
+          },
+          attendees: [{ email: email }],
+        };
+
+        console.log("Criando evento no Google Agenda...");
+
+        try {
+          // Autenticar com o Google Agenda
+          const auth = new google.auth.GoogleAuth({
+            keyFile: "path/to/your-service-account-key.json", // Substituir pelo caminho para a chave de conta de serviço
+            scopes: ["https://www.googleapis.com/auth/calendar"],
+          });
+
+          const calendar = google.calendar({ version: "v3", auth });
+          const calendarId = "primary"; // Substituir pelo ID do calendário, se não for o principal
+
+          // Inserir o evento no Google Agenda
+          const result = await calendar.events.insert({
+            calendarId: calendarId,
+            requestBody: event,
+          });
+
+          console.log("Evento criado com sucesso:", result.data);
+
+          // Responder ao cliente com a confirmação
+          res.json({
+            fulfillmentText: `Consulta marcada com sucesso para ${selectedSlot}. Um e-mail foi enviado para ${email}.`,
+          });
+        } catch (error) {
+          console.error("Erro ao criar o evento no Google Agenda:", error);
+          res.json({
+            fulfillmentText:
+              "Desculpe, ocorreu um erro ao marcar a consulta. Por favor, tente novamente mais tarde.",
+          });
+        }
+
+        break;
+      }
+
       case "saudacoes_e_boas_vindas":
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
         break;
