@@ -241,7 +241,21 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
-      case "Marcar Consulta":
+      case "Marcar Consulta": {
+        console.log("Iniciando a intenção Marcar Consulta...");
+
+        // Captura os parâmetros
+        const slotNumber = req.body.queryResult.parameters?.number;
+        const nome = req.body.queryResult.parameters?.nome;
+        const email = req.body.queryResult.parameters?.email;
+        const telefone = req.body.queryResult.parameters?.telefone;
+
+        console.log("Parâmetros recebidos:");
+        console.log("Número do horário selecionado:", slotNumber);
+        console.log("Nome:", nome);
+        console.log("E-mail:", email);
+        console.log("Telefone:", telefone);
+
         try {
           const calendarId = "jurami.junior@gmail.com";
           const availableSlots = await getAvailableSlots(calendarId);
@@ -249,19 +263,83 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           if (availableSlots.length === 0) {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-          } else {
-            responseText = `Os horários disponíveis são:\n${availableSlots
+            console.log("Nenhum horário disponível.");
+            res.json({ fulfillmentText: responseText });
+            break;
+          }
+
+          if (!slotNumber) {
+            // Exibe os horários disponíveis e solicita o número
+            let responseText = `Os horários disponíveis são:\n${availableSlots
               .map((s, i) => `${i + 1}) ${s}`)
               .join(
                 "\n"
-              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
+              )}\n\nPor favor, responda com o número do horário desejado.`;
+            console.log("Mensagem de horários disponíveis:", responseText);
+
+            res.json({ fulfillmentText: responseText });
+            break;
           }
+
+          // Processa a seleção do número
+          const slotIndex = parseInt(slotNumber) - 1;
+
+          if (slotIndex < 0 || slotIndex >= availableSlots.length) {
+            responseText =
+              "A escolha não é válida. Por favor, escolha um número da lista.";
+            console.log("Erro: Número inválido selecionado:", slotNumber);
+            res.json({ fulfillmentText: responseText });
+            break;
+          }
+
+          const selectedSlot = availableSlots[slotIndex];
+          console.log("Horário selecionado:", selectedSlot);
+
+          // Converte o horário selecionado para o formato ISO
+          const [datePart, timePart] = selectedSlot.split(" ");
+          const [day, month, year] = datePart.split("/");
+          const [hour, minute] = timePart.split(":");
+          const timeZone = "America/Sao_Paulo";
+          const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
+          const isoEndDateTime = `${year}-${month}-${day}T${String(
+            parseInt(hour, 10) + 1
+          ).padStart(2, "0")}:${minute}:00`;
+
+          const event = {
+            summary: `Consulta com ${nome}`,
+            description: `Consulta marcada automaticamente.\n\nDetalhes do cliente:\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
+            start: { dateTime: isoStartDateTime, timeZone },
+            end: { dateTime: isoEndDateTime, timeZone },
+          };
+
+          try {
+            const result = await calendar.events.insert({
+              calendarId,
+              requestBody: event,
+            });
+            console.log(
+              "Evento criado com sucesso no Google Calendar:",
+              result.data
+            );
+
+            responseText = `Consulta marcada com sucesso para ${selectedSlot}.`;
+          } catch (error) {
+            console.error("Erro ao criar evento no Google Calendar:", error);
+            responseText =
+              "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente.";
+          }
+
+          res.json({ fulfillmentText: responseText });
         } catch (error) {
           console.error("Erro ao buscar os horários disponíveis:", error);
-          responseText =
-            "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.";
+          res.json({
+            fulfillmentText:
+              "Desculpe, ocorreu um erro ao buscar os horários disponíveis. Por favor, tente novamente mais tarde.",
+          });
         }
+
         break;
+      }
 
       case "saudacoes_e_boas_vindas":
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
