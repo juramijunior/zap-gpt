@@ -213,105 +213,16 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
-      case "Marcar Consulta": {
-        console.log("Iniciando a intenção Marcar Consulta...");
-
-        const availableSlots = [
-          "24/12/2024 15:00",
-          "25/12/2024 17:00",
-          "25/12/2024 08:00",
-        ];
-        res.json({
-          fulfillmentText: `Os horários disponíveis são:\n${availableSlots
-            .map((s, i) => `${i + 1}) ${s}`)
-            .join("\n")}\n\nPor favor, informe o número do horário desejado.`,
-          outputContexts: [
-            {
-              name: `${req.body.session}/contexts/marcar_consulta_context`,
-              lifespanCount: 5,
-              parameters: { availableSlots },
-            },
-          ],
-        });
+      case "Marcar Consulta":
+        handleMarcarConsulta(req, res);
         break;
-      }
-
-      case "Default Fallback Intent": {
-        console.log(
-          "Fallback acionado. Verificando se o cliente digitou um número..."
-        );
-
-        // Verifica se o texto é um número
-        const userInput = req.body.queryResult.queryText;
-        const context = req.body.queryResult.outputContexts.find(
-          (c: {
-            name: string;
-            lifespanCount: number;
-            parameters: { [key: string]: any };
-          }) => c.name.includes("marcar_consulta_context")
-        );
-
-        if (!context) {
-          console.log("Contexto 'marcar_consulta_context' não encontrado.");
-          res.json({
-            fulfillmentText:
-              "Não entendi sua solicitação. P or favor, tente novamente.",
-          });
-          break;
-        }
-
-        const availableSlots = context.parameters?.availableSlots || [];
-
-        if (!isNaN(userInput)) {
-          const slotNumber = parseInt(userInput, 10);
-
-          if (slotNumber > 0 && slotNumber <= availableSlots.length) {
-            console.log("Número válido identificado:", slotNumber);
-
-            const selectedSlot = availableSlots[slotNumber - 1];
-
-            // Dispara o evento para a próxima intenção
-            res.json({
-              followupEventInput: {
-                name: "CAPTURAR_NUMERO_HORARIO",
-                languageCode: "pt-br",
-                parameters: {
-                  selectedSlot,
-                },
-              },
-            });
-          } else {
-            res.json({
-              fulfillmentText:
-                "Número inválido. Por favor, escolha um número da lista exibida.",
-            });
-          }
-        } else {
-          res.json({
-            fulfillmentText:
-              "Não entendi sua solicitação. Por favor, tente novamente.",
-          });
-        }
+      case "Escolher Opção":
+        handleEscolherOpcao(req, res);
         break;
-      }
-
-      case "Marcar Consulta - Capturar Número": {
-        console.log("Intenção acionada via evento para Capturar Número...");
-
-        const selectedSlot = req.body.queryResult.parameters?.selectedSlot;
-
-        res.json({
-          fulfillmentText: `Horário ${selectedSlot} selecionado. Por favor, informe o seu nome.`,
-          outputContexts: [
-            {
-              name: `${req.body.session}/contexts/capturar_dados_context`,
-              lifespanCount: 5,
-              parameters: { selectedSlot },
-            },
-          ],
-        });
+      case "Coletar Informações":
+        handleColetarInformacoes(req, res);
         break;
-      }
+
       case "saudacoes_e_boas_vindas":
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
         break;
@@ -427,3 +338,123 @@ interface SessionVars {
   selectedSlot?: string;
   name?: string;
 }
+
+function handleMarcarConsulta(req: DialogflowRequest, res: Response) {
+  // Supondo que você já tenha uma função para obter as opções
+  const opcoes = getAvailableOptions(); // Retorna array de objetos com data e hora
+
+  let responseText =
+    "Por favor, escolha uma das opções abaixo digitando o número correspondente:\n";
+  opcoes.forEach((opcao, index) => {
+    responseText += `${index + 1}. ${opcao.data} às ${opcao.hora}\n`;
+  });
+
+  // Definir o contexto para esperar a escolha da opção
+  res.json({
+    fulfillmentText: responseText,
+    outputContexts: [
+      {
+        name: `${req.body.session}/contexts/awaiting-option`,
+        lifespanCount: 5,
+        parameters: {
+          opcoes: opcoes,
+        },
+      },
+    ],
+  });
+}
+
+// Exemplo de função para obter opções disponíveis
+function getAvailableOptions() {
+  // Aqui você pode implementar lógica para buscar datas disponíveis
+  // Exemplo estático:
+  return [
+    { data: "01/05/2024", hora: "10:00" },
+    { data: "02/05/2024", hora: "14:00" },
+    { data: "03/05/2024", hora: "16:00" },
+    { data: "04/05/2024", hora: "09:00" },
+    { data: "05/05/2024", hora: "11:00" },
+  ];
+}
+
+function handleEscolherOpcao(req: DialogflowRequest, res: Response) {
+  const context = req.body.queryResult.outputContexts.find((ctx) =>
+    ctx.name.endsWith("/contexts/awaiting-option")
+  );
+
+  if (!context) {
+    res
+      .status(400)
+      .json({ error: "Contexto 'collected-option' não encontrado." });
+    return;
+  }
+  const opcoes = context.parameters.opcoes;
+
+  const selectedOptionNumber = parseInt(req.body.queryResult.parameters.option);
+
+  if (
+    isNaN(selectedOptionNumber) ||
+    selectedOptionNumber < 1 ||
+    selectedOptionNumber > opcoes.length
+  ) {
+    return res.json({
+      fulfillmentText:
+        "Opção inválida. Por favor, escolha um número entre 1 e 5.",
+    });
+  }
+
+  const selectedOption = opcoes[selectedOptionNumber - 1];
+
+  // Armazenar a opção selecionada no contexto
+  res.json({
+    fulfillmentText: `Você escolheu a opção ${selectedOptionNumber}: ${selectedOption.data} às ${selectedOption.hora}. Agora, por favor, me informe seu nome.`,
+    outputContexts: [
+      {
+        name: `${req.body.session}/contexts/collected-option`,
+        lifespanCount: 5,
+        parameters: {
+          selectedData: selectedOption.data,
+          selectedHora: selectedOption.hora,
+        },
+      },
+    ],
+  });
+}
+
+function handleColetarInformacoes(req: DialogflowRequest, res: Response) {
+  const context = req.body.queryResult.outputContexts.find((ctx) =>
+    ctx.name.endsWith("/contexts/collected-option")
+  );
+
+  if (!context) {
+    res
+      .status(400)
+      .json({ error: "Contexto 'collected-option' não encontrado." });
+    return;
+  }
+  const selectedData = context.parameters.selectedData;
+  const selectedHora = context.parameters.selectedHora;
+
+  const name = req.body.queryResult.parameters.name;
+  const email = req.body.queryResult.parameters.email;
+  const phone = req.body.queryResult.parameters.phone;
+
+  // Validar os dados
+  if (!name || !email || !phone) {
+    return res.json({
+      fulfillmentText:
+        "Por favor, forneça todas as informações: nome, e-mail e telefone.",
+    });
+  }
+}
+
+interface DialogflowRequestBody {
+  queryResult: {
+    queryText: string;
+    parameters: Record<string, any>;
+    outputContexts: Array<{ name: string; parameters: Record<string, any> }>;
+  };
+  session: string;
+}
+
+type DialogflowRequest = Request<any, any, DialogflowRequestBody>;
