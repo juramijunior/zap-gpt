@@ -186,104 +186,57 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
 
       case "Selecionar Horário": {
-        console.log("Iniciando a intent Selecionar Horário...");
-
-        // Obter os horários disponíveis do calendário
-        const calendarId = "jurami.junior@gmail.com";
-        const availableSlots = await getAvailableSlots(calendarId);
-        console.log("Horários disponíveis:", availableSlots);
-
-        if (!req.body.queryResult.parameters?.number) {
-          // Se o número do horário não foi informado, gerar a mensagem inicial
-          const limitedSlots = availableSlots.slice(0, 18); // Limitar a 18 horários (ou conforme necessário)
-
-          // Construir a mensagem dinamicamente
-          let responseText = "Os horários disponíveis são:\n";
-          limitedSlots.forEach((slot, index) => {
-            responseText += `${index + 1}) ${slot}\n`;
-          });
-
-          // Adicionar instruções
-          responseText +=
-            "\nPor favor, responda com o número do horário desejado.";
-          responseText +=
-            "\nCaso queira cadastrar uma consulta manualmente, responda com 0.";
-
-          console.log(
-            "Mensagem de resposta gerada dinamicamente:",
-            responseText
-          );
-
-          // Enviar a mensagem inicial para o Dialogflow
-          res.json({
-            fulfillmentText: responseText,
-          });
-          break;
-        }
-
-        // Capturar o número selecionado
         const slotNumber = req.body.queryResult.parameters?.number;
-        console.log("Número selecionado pelo usuário:", slotNumber);
+        const nome = req.body.queryResult.parameters?.nome;
+        const email = req.body.queryResult.parameters?.email;
+        const telefone = req.body.queryResult.parameters?.telefone;
 
-        if (slotNumber === 0) {
-          // Se o usuário escolher 0, oferecer cadastro manual
-          console.log("Usuário escolheu cadastrar consulta manualmente.");
-          res.json({
-            fulfillmentText:
-              "Você escolheu cadastrar uma consulta manualmente. Por favor, forneça os detalhes (data e horário).",
-          });
+        if (!slotNumber) {
+          responseText = "Por favor, informe um número válido para o horário.";
           break;
         }
 
         const slotIndex = parseInt(slotNumber) - 1;
+        const calendarId = "jurami.junior@gmail.com";
+        const availableSlots = await getAvailableSlots(calendarId);
 
         if (slotIndex < 0 || slotIndex >= availableSlots.length) {
-          // Validar se o número está dentro do intervalo de horários disponíveis
-          console.log("Erro: Número inválido selecionado:", slotNumber);
-          res.json({
-            fulfillmentText:
-              "A esolha não é válida. Por favor, escolha um número da lista ou 0 para cadastrar manualmente.",
-          });
+          responseText =
+            "A escolha não é válida. Por favor, escolha um número da lista.";
           break;
         }
 
         const selectedSlot = availableSlots[slotIndex];
-        console.log("Horário selecionado:", selectedSlot);
+        console.log("Valor de selectedSlot:", selectedSlot);
 
-        // Converter o horário selecionado para o formato ISO
+        // Converte para o formato ISO
         const [datePart, timePart] = selectedSlot.split(" ");
         const [day, month, year] = datePart.split("/");
         const [hour, minute] = timePart.split(":");
+
         const timeZone = "America/Sao_Paulo";
         const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
         const isoEndDateTime = `${year}-${month}-${day}T${String(
           parseInt(hour, 10) + 1
         ).padStart(2, "0")}:${minute}:00`;
 
-        // Criar o evento no Google Calendar
         const event = {
-          summary: "Consulta",
-          description: "Consulta médica agendada automaticamente.",
+          summary: `Consulta com ${nome}`,
+          description: `Consulta médica agendada pelo sistema.\n\nDetalhes do cliente:\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
           start: { dateTime: isoStartDateTime, timeZone },
           end: { dateTime: isoEndDateTime, timeZone },
         };
 
         try {
-          const result = await calendar.events.insert({
+          await calendar.events.insert({
             calendarId,
             requestBody: event,
           });
-          console.log("Evento criado com sucesso:", result.data);
-
-          res.json({
-            fulfillmentText: `Consulta marcada com sucesso para ${selectedSlot}.`,
-          });
+          responseText = `Consulta marcada com sucesso para ${selectedSlot}. Cliente: ${nome}.`;
         } catch (error) {
           console.error("Erro ao criar evento no Google Calendar:", error);
-          res.json({
-            fulfillmentText:
-              "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente.",
-          });
+          responseText =
+            "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
         }
         break;
       }
