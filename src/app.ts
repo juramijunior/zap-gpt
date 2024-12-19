@@ -187,6 +187,9 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
       case "Selecionar Horário": {
         const slotNumber = req.body.queryResult.parameters?.number;
+        const nome = req.body.queryResult.parameters?.nome;
+        const email = req.body.queryResult.parameters?.email;
+        const telefone = req.body.queryResult.parameters?.telefone;
 
         if (!slotNumber) {
           responseText = "Por favor, informe um número válido para o horário.";
@@ -218,8 +221,8 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         ).padStart(2, "0")}:${minute}:00`;
 
         const event = {
-          summary: "Consulta",
-          description: "Consulta médica agendada pelo sistema.",
+          summary: `Consulta com ${nome}`,
+          description: `Consulta médica agendada pelo sistema.\n\nDetalhes do cliente:\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
           start: { dateTime: isoStartDateTime, timeZone },
           end: { dateTime: isoEndDateTime, timeZone },
         };
@@ -229,7 +232,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             calendarId,
             requestBody: event,
           });
-          responseText = `Consulta marcada com sucesso para ${selectedSlot}.`;
+          responseText = `Consulta marcada com sucesso para ${selectedSlot}. Cliente: ${nome}.`;
         } catch (error) {
           console.error("Erro ao criar evento no Google Calendar:", error);
           responseText =
