@@ -188,39 +188,49 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       case "Selecionar Horário": {
         console.log("Iniciando a intent Selecionar Horário...");
 
-        const slotNumber = req.body.queryResult.parameters?.number;
-        const nome = req.body.queryResult.parameters?.nome;
-        const email = req.body.queryResult.parameters?.email;
-        const telefone = req.body.queryResult.parameters?.telefone;
-
-        console.log("Parâmetros recebidos:");
-        console.log("Nome:", nome);
-        console.log("E-mail:", email);
-        console.log("Telefone:", telefone);
-        console.log("Número do horário selecionado:", slotNumber);
-
+        // Obter os horários disponíveis do calendário
         const calendarId = "jurami.junior@gmail.com";
-
-        // Adicione aqui a chamada para `getAvailableSlots` e atribua à variável `availableSlots`
         const availableSlots = await getAvailableSlots(calendarId);
-
         console.log("Horários disponíveis:", availableSlots);
 
-        if (!slotNumber) {
-          // Limitar a 5 horários
-          const limitedSlots = availableSlots.slice(0, 5);
+        if (!req.body.queryResult.parameters?.number) {
+          // Se o número do horário não foi informado, gerar a mensagem inicial
+          const limitedSlots = availableSlots.slice(0, 18); // Limitar a 18 horários (ou conforme necessário)
 
-          let responseText = "Os horários disponíveis são:\n\n";
+          // Construir a mensagem dinamicamente
+          let responseText = "Os horários disponíveis são:\n";
           limitedSlots.forEach((slot, index) => {
-            responseText += `${index + 1}. ${slot}\n`;
+            responseText += `${index + 1}) ${slot}\n`;
           });
 
+          // Adicionar instruções
           responseText +=
-            "\n\nPor favor, escolha o número do horário desejado.";
-          console.log("Mensagem de resposta:", responseText);
+            "\nPor favor, responda com o número do horário desejado.";
+          responseText +=
+            "\nCaso queira cadastrar uma consulta manualmente, responda com 0.";
 
+          console.log(
+            "Mensagem de resposta gerada dinamicamente:",
+            responseText
+          );
+
+          // Enviar a mensagem inicial para o Dialogflow
           res.json({
             fulfillmentText: responseText,
+          });
+          break;
+        }
+
+        // Capturar o número selecionado
+        const slotNumber = req.body.queryResult.parameters?.number;
+        console.log("Número selecionado pelo usuário:", slotNumber);
+
+        if (slotNumber === 0) {
+          // Se o usuário escolher 0, oferecer cadastro manual
+          console.log("Usuário escolheu cadastrar consulta manualmente.");
+          res.json({
+            fulfillmentText:
+              "Você escolheu cadastrar uma consulta manualmente. Por favor, forneça os detalhes (data e horário).",
           });
           break;
         }
@@ -228,59 +238,53 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         const slotIndex = parseInt(slotNumber) - 1;
 
         if (slotIndex < 0 || slotIndex >= availableSlots.length) {
-          responseText =
-            "A escolha não é válida. Por favor, escolha um número da lista.";
-          console.log("Erro: Horário inválido. Índice selecionado:", slotIndex);
+          // Validar se o número está dentro do intervalo de horários disponíveis
+          console.log("Erro: Número inválido selecionado:", slotNumber);
+          res.json({
+            fulfillmentText:
+              "A escolha não é válida. Por favor, escolha um número da lista ou 0 para cadastrar manualmente.",
+          });
           break;
         }
 
         const selectedSlot = availableSlots[slotIndex];
         console.log("Horário selecionado:", selectedSlot);
 
-        // Converter horário selecionado para formato ISO
+        // Converter o horário selecionado para o formato ISO
         const [datePart, timePart] = selectedSlot.split(" ");
         const [day, month, year] = datePart.split("/");
         const [hour, minute] = timePart.split(":");
-
         const timeZone = "America/Sao_Paulo";
         const isoStartDateTime = `${year}-${month}-${day}T${hour}:${minute}:00`;
         const isoEndDateTime = `${year}-${month}-${day}T${String(
           parseInt(hour, 10) + 1
         ).padStart(2, "0")}:${minute}:00`;
 
-        console.log("ISO Start DateTime:", isoStartDateTime);
-        console.log("ISO End DateTime:", isoEndDateTime);
-
-        // Criar o evento com informações do cliente
+        // Criar o evento no Google Calendar
         const event = {
-          summary: `Consulta com ${nome}`,
-          description: `Detalhes da consulta:\n\nNome: ${nome}\nE-mail: ${email}\nTelefone: ${telefone}`,
+          summary: "Consulta",
+          description: "Consulta médica agendada automaticamente.",
           start: { dateTime: isoStartDateTime, timeZone },
           end: { dateTime: isoEndDateTime, timeZone },
         };
 
-        console.log("Criando evento no Google Calendar...");
-        console.log("Evento:", event);
-
         try {
-          // Inserir o evento no Google Calendar
           const result = await calendar.events.insert({
             calendarId,
             requestBody: event,
           });
-          console.log(
-            "Evento criado com sucesso no Google Calendar:",
-            result.data
-          );
+          console.log("Evento criado com sucesso:", result.data);
 
-          responseText = `Consulta marcada com sucesso para ${selectedSlot}. Cliente: ${nome}.`;
+          res.json({
+            fulfillmentText: `Consulta marcada com sucesso para ${selectedSlot}.`,
+          });
         } catch (error) {
           console.error("Erro ao criar evento no Google Calendar:", error);
-          responseText =
-            "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente mais tarde.";
+          res.json({
+            fulfillmentText:
+              "Ocorreu um erro ao tentar marcar a consulta. Por favor, tente novamente.",
+          });
         }
-
-        console.log("Finalizando a intent Selecionar Horário...");
         break;
       }
 
