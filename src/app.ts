@@ -255,7 +255,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           console.log("Contexto 'marcar_consulta_context' não encontrado.");
           res.json({
             fulfillmentText:
-              "Não entendi sua solicitação. Por favor, tente novamente.",
+              "Não entendi sua solicitação. P or favor, tente novamente.",
           });
           break;
         }
