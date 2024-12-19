@@ -216,136 +216,70 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       case "Marcar Consulta": {
         console.log("Iniciando a intenção Marcar Consulta...");
 
-        // Captura o número do horário (se fornecido)
-        const slotNumber = req.body.queryResult.parameters?.number || null;
+        const availableSlots = [
+          "24/12/2024 15:00",
+          "24/12/2024 17:00",
+          "25/12/2024 08:00",
+        ];
 
-        const calendarId = "jurami.junior@gmail.com";
-        const availableSlots = await getAvailableSlots(calendarId);
-
-        if (availableSlots.length === 0) {
-          res.json({
-            fulfillmentText:
-              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.",
-          });
-          break;
-        }
-
-        if (!slotNumber) {
-          // Exibe os horários disponíveis
-          let responseText = `Os horários disponíveis são:\n${availableSlots
+        res.json({
+          fulfillmentText: `Os horários disponíveis são:\n${availableSlots
             .map((s, i) => `${i + 1}) ${s}`)
-            .join(
-              "\n"
-            )}\n\nPor favor, responda com o número do horário desejado.`;
-          console.log("Mensagem de horários disponíveis:", responseText);
-
-          // Envia a lista de horários e define o contexto de saída
-          res.json({
-            fulfillmentText: responseText,
-            outputContexts: [
-              {
-                name: `${req.body.session}/contexts/marcar_consulta_context`,
-                lifespanCount: 5,
-                parameters: { availableSlots }, // Armazena os horários disponíveis
-              },
-            ],
-          });
-          break;
-        }
-
-        console.log("Número do horário já recebido:", slotNumber);
-        // Continue com o fluxo...
+            .join("\n")}\n\nPor favor, informe o número do horário desejado.`,
+          outputContexts: [
+            {
+              name: `${req.body.session}/contexts/marcar_consulta_context`,
+              lifespanCount: 5,
+              parameters: { availableSlots },
+            },
+          ],
+        });
         break;
       }
 
-      case "Marcar Consulta - Capturar E-mail": {
-        console.log(
-          "Iniciando a intenção final para criar o evento no Google Agenda..."
-        );
+      case "Marcar Consulta - Capturar Número": {
+        console.log("Iniciando a intenção Capturar Número...");
 
-        // Recuperar o contexto com os dados necessários
         const context = req.body.queryResult.outputContexts.find(
-          (c: { name: string; parameters: any }) =>
-            c.name.includes("marcar_consulta_context")
+          (c: {
+            name: string;
+            lifespanCount: number;
+            parameters: { [key: string]: any };
+          }) => c.name.includes("marcar_consulta_context")
         );
 
-        const selectedSlot = context?.parameters?.selectedSlot; // Horário selecionado
-        const nome = req.body.queryResult.parameters?.nome; // Nome do cliente
-        const telefone = req.body.queryResult.parameters?.telefone; // Telefone
-        const email = req.body.queryResult.parameters?.email; // E-mail
+        const availableSlots = context?.parameters?.availableSlots || [];
+        const slotNumber = req.body.queryResult.parameters?.number;
 
-        // Validar se todos os dados estão presentes
-        if (!selectedSlot || !nome || !telefone || !email) {
+        if (!slotNumber) {
           res.json({
             fulfillmentText:
-              "Erro: dados insuficientes para marcar a consulta. Por favor, tente novamente.",
+              "Por favor, informe um número válido para o horário desejado.",
           });
           break;
         }
 
-        console.log("Dados recebidos:");
-        console.log("Horário:", selectedSlot);
-        console.log("Nome:", nome);
-        console.log("Telefone:", telefone);
-        console.log("E-mail:", email);
-
-        // Converte o horário selecionado para o formato ISO 8601
-        const [datePart, timePart] = selectedSlot.split(" ");
-        const [day, month, year] = datePart.split("/");
-        const [hour, minute] = timePart.split(":");
-        const timeZone = "America/Sao_Paulo";
-        const startDateTime = new Date(
-          `${year}-${month}-${day}T${hour}:${minute}:00`
-        );
-        const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000); // Adiciona 1 hora ao horário de início
-
-        // Configurar o evento do Google Agenda
-        const event = {
-          summary: `Consulta com ${nome}`,
-          description: `Detalhes do cliente:\nNome: ${nome}\nTelefone: ${telefone}\nE-mail: ${email}`,
-          start: {
-            dateTime: startDateTime.toISOString(),
-            timeZone: timeZone,
-          },
-          end: {
-            dateTime: endDateTime.toISOString(),
-            timeZone: timeZone,
-          },
-          attendees: [{ email: email }],
-        };
-
-        console.log("Criando evento no Google Agenda...");
-
-        try {
-          // Autenticar com o Google Agenda
-          const auth = new google.auth.GoogleAuth({
-            keyFile: "path/to/your-service-account-key.json", // Substituir pelo caminho para a chave de conta de serviço
-            scopes: ["https://www.googleapis.com/auth/calendar"],
-          });
-
-          const calendar = google.calendar({ version: "v3", auth });
-          const calendarId = "primary"; // Substituir pelo ID do calendário, se não for o principal
-
-          // Inserir o evento no Google Agenda
-          const result = await calendar.events.insert({
-            calendarId: calendarId,
-            requestBody: event,
-          });
-
-          console.log("Evento criado com sucesso:", result.data);
-
-          // Responder ao cliente com a confirmação
-          res.json({
-            fulfillmentText: `Consulta marcada com sucesso para ${selectedSlot}. Um e-mail foi enviado para ${email}.`,
-          });
-        } catch (error) {
-          console.error("Erro ao criar o evento no Google Agenda:", error);
+        if (slotNumber < 1 || slotNumber > availableSlots.length) {
           res.json({
             fulfillmentText:
-              "Desculpe, ocorreu um erro ao marcar a consulta. Por favor, tente novamente mais tarde.",
+              "Número inválido. Por favor, escolha um número da lista exibida.",
           });
+          break;
         }
 
+        const selectedSlot = availableSlots[slotNumber - 1];
+        console.log("Horário selecionado:", selectedSlot);
+
+        res.json({
+          fulfillmentText: `Horário ${selectedSlot} selecionado. Por favor, informe o seu nome.`,
+          outputContexts: [
+            {
+              name: `${req.body.session}/contexts/capturar_dados_context`,
+              lifespanCount: 5,
+              parameters: { selectedSlot },
+            },
+          ],
+        });
         break;
       }
 
