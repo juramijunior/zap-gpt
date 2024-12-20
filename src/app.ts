@@ -5,28 +5,22 @@ import bodyParser from "body-parser";
 import axios from "axios";
 import qs from "qs";
 import { transcribeAudio } from "./services/openai";
-import { v4 as uuidv4 } from "uuid";
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-const WATSONX_ASSISTANT_ID = process.env.WATSONX_ASSISTANT_ID;
-const WATSONX_API_KEY = process.env.WATSONX_API_KEY;
-const WATSONX_URL = process.env.WATSONX_URL;
+const WATSONX_ASSISTANT_ID = process.env.WATSONX_ASSISTANT_ID!;
+const WATSONX_API_KEY = process.env.WATSONX_API_KEY!;
+const WATSONX_URL = process.env.WATSONX_URL!;
+// Ex: "https://api.us-south.assistant.watson.cloud.ibm.com/instances/<instance_id>"
+// Obtido nas credenciais do seu serviço Watson Assistant clássico.
 
-// Defina a versão da API do Watson Assistant
-const WATSONX_VERSION = "2023-06-14";
+const WATSONX_VERSION = "2023-06-14"; // Ajuste a versão conforme a documentação atual da IBM
 
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
-
-// Debug das variáveis de ambiente
-console.log("Watson Assistant Config:");
-console.log("ASSISTANT_ID:", WATSONX_ASSISTANT_ID);
-console.log("API_KEY:", WATSONX_API_KEY ? "OK" : "Missing");
-console.log("URL:", WATSONX_URL);
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID!;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN!;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER!;
 
 // Função para dividir mensagens longas
 function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
@@ -37,13 +31,11 @@ function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   return partes;
 }
 
-// Rota de Webhook do WhatsApp
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
     const fromNumber = req.body.From;
     const incomingMessage = req.body.Body || "";
     const audioUrl = req.body.MediaUrl0;
-
     let finalUserMessage = incomingMessage;
 
     // Transcrição do áudio se houver
@@ -59,7 +51,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Criação da sessão no Watson Assistant (v2) com parâmetro version
+    // Criar sessão (API V2 Clássica)
     let sessionId: string;
     try {
       const sessionResponse = await axios.post(
@@ -87,14 +79,12 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Envio da mensagem para o Watson Assistant (v2) com parâmetro version
+    // Envio da mensagem para o Assistant (API V2 Clássica)
     let watsonResponse;
     try {
       watsonResponse = await axios.post(
         `${WATSONX_URL}/v2/assistants/${WATSONX_ASSISTANT_ID}/sessions/${sessionId}/message?version=${WATSONX_VERSION}`,
-        {
-          input: { message_type: "text", text: finalUserMessage },
-        },
+        { input: { message_type: "text", text: finalUserMessage } },
         {
           headers: {
             Authorization:
@@ -121,7 +111,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         ?.map((resp: any) => resp.text)
         .join("\n") || "Desculpe, não entendi.";
 
-    // Enviar mensagens pelo Twilio
+    // Enviar mensagem de volta pelo Twilio
     const partesMensagem = dividirMensagem(fullResponseMessage);
     for (const parte of partesMensagem) {
       const url = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
@@ -134,8 +124,8 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       try {
         await axios.post(url, qs.stringify(data), {
           auth: {
-            username: TWILIO_ACCOUNT_SID || "",
-            password: TWILIO_AUTH_TOKEN || "",
+            username: TWILIO_ACCOUNT_SID,
+            password: TWILIO_AUTH_TOKEN,
           },
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
         });
