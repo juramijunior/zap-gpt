@@ -62,6 +62,7 @@ async function getAvailableSlots(
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
   try {
+    console.log("Obtendo horários disponíveis do Google Calendar...");
     const response = await calendar.events.list({
       calendarId,
       timeMin: startDate.toISOString(),
@@ -71,16 +72,16 @@ async function getAvailableSlots(
     });
 
     const events = response.data.items || [];
+    console.log(`Eventos obtidos: ${events.length}`);
+
     const freeSlots: string[] = [];
     let currentDate = toZonedTime(startDate, timeZone);
 
     while (currentDate < endDate) {
       const dayOfWeek = currentDate.getDay();
-
       let startHour = 0;
       let endHour = 0;
 
-      // Terça: 14-19, Quarta: 8-13
       if (dayOfWeek === 2) {
         startHour = 14;
         endHour = 19;
@@ -118,7 +119,8 @@ async function getAvailableSlots(
         });
 
         if (isFree) {
-          freeSlots.push(format(currentDate, "dd/MM/yyyy HH:mm", { timeZone }));
+          const slotStr = format(currentDate, "dd/MM/yyyy HH:mm", { timeZone });
+          freeSlots.push(slotStr);
         }
 
         currentDate.setMinutes(currentDate.getMinutes() + timeIncrement);
@@ -128,6 +130,7 @@ async function getAvailableSlots(
       currentDate = toZonedTime(currentDate, timeZone);
     }
 
+    console.log(`Horários disponíveis encontrados: ${freeSlots.length}`);
     return freeSlots;
   } catch (error) {
     console.error("Erro ao buscar horários disponíveis:", error);
@@ -142,8 +145,8 @@ async function createEvent(
   clientEmail: string,
   clientPhone: string
 ) {
+  console.log("Criando evento no Google Calendar...");
   const timeZone = "America/Sao_Paulo";
-  // chosenSlot no formato "dd/MM/yyyy HH:mm"
   const [datePart, timePart] = chosenSlot.split(" ");
   const [day, month, year] = datePart.split("/");
   const [hour, minute] = timePart.split(":");
@@ -160,17 +163,26 @@ async function createEvent(
     end: { dateTime: isoEndDateTime, timeZone },
   };
 
-  await calendar.events.insert({
-    calendarId,
-    requestBody: event,
-  });
+  try {
+    const insertResp = await calendar.events.insert({
+      calendarId,
+      requestBody: event,
+    });
+    console.log("Evento criado com sucesso:", insertResp.data);
+  } catch (err) {
+    console.error("Erro ao criar evento no Google Calendar:", err);
+    throw err;
+  }
 }
 
 app.post("/fulfillment", async (req: Request, res: Response) => {
+  console.log("=== Fulfillment recebido do Dialogflow ===");
   const intentName = req.body.queryResult.intent.displayName;
+  console.log("Intenção disparada:", intentName);
   const sessionPath: string = req.body.session || "";
   const sessionId = sessionPath.split("/").pop() || "";
   const userQuery = req.body.queryResult.queryText;
+  console.log("Texto do usuário:", userQuery);
   const audioUrl = req.body.originalDetectIntentRequest?.payload?.audioUrl;
 
   const outputContexts = req.body.queryResult.outputContexts || [];
@@ -184,6 +196,8 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   let clientEmail = flowContext?.parameters?.clientEmail || "";
   let clientPhone = flowContext?.parameters?.clientPhone || "";
   let availableSlots = flowContext?.parameters?.availableSlots || [];
+
+  console.log("Estado atual:", state);
 
   let responseText = "Desculpe, não entendi sua solicitação.";
   let finalUserInput = userQuery;
@@ -204,6 +218,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       case "Marcar Consulta": {
         const calendarId = "jurami.junior@gmail.com";
         if (state === "INITIAL") {
+          console.log("Estado INITIAL. Buscando horários disponíveis...");
           const fetchedSlots = await getAvailableSlots(calendarId);
           if (fetchedSlots.length === 0) {
             responseText =
@@ -211,6 +226,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             state = "FINISHED";
           } else {
             availableSlots = fetchedSlots.slice(0, 4);
+            console.log("Horários limitados a 4:", availableSlots);
             responseText = `Os horários disponíveis são:\n${availableSlots
               .map((s: string, i: number) => `${i + 1} - ${s}`)
               .join(
@@ -219,6 +235,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             state = "AWAITING_SLOT_SELECTION";
           }
         } else if (state === "AWAITING_SLOT_SELECTION") {
+          console.log("Estado AWAITING_SLOT_SELECTION. Verificando número...");
           const userNumber = parseInt(finalUserInput, 10);
           if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
             if (userNumber === 0) {
@@ -229,6 +246,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
               const slotIndex = userNumber - 1;
               if (slotIndex >= 0 && slotIndex < availableSlots.length) {
                 chosenSlot = availableSlots[slotIndex];
+                console.log("Horário escolhido:", chosenSlot);
                 responseText =
                   "Ótimo! Agora, por favor, informe o seu nome completo.";
                 state = "AWAITING_NAME";
@@ -241,24 +259,38 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
           }
         } else if (state === "AWAITING_MANUAL_DATE_TIME") {
+          console.log(
+            "Estado AWAITING_MANUAL_DATE_TIME. Armazenando data/hora manual..."
+          );
           chosenSlot = finalUserInput;
+          console.log("Data/hora manual:", chosenSlot);
           responseText =
             "Certo, agora, por favor, informe o seu nome completo.";
           state = "AWAITING_NAME";
         } else if (state === "AWAITING_NAME") {
+          console.log("Estado AWAITING_NAME. Armazenando nome...");
           clientName = finalUserInput;
+          console.log("Nome:", clientName);
           responseText = "Agora, informe seu e-mail, por favor.";
           state = "AWAITING_EMAIL";
         } else if (state === "AWAITING_EMAIL") {
+          console.log("Estado AWAITING_EMAIL. Armazenando e-mail...");
           clientEmail = finalUserInput;
+          console.log("E-mail:", clientEmail);
           responseText = "Agora, informe seu número de telefone, por favor.";
           state = "AWAITING_PHONE";
         } else if (state === "AWAITING_PHONE") {
+          console.log("Estado AWAITING_PHONE. Armazenando telefone...");
           clientPhone = finalUserInput;
+          console.log("Telefone:", clientPhone);
           responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
           state = "AWAITING_CONFIRMATION";
         } else if (state === "AWAITING_CONFIRMATION") {
+          console.log(
+            "Estado AWAITING_CONFIRMATION. Verificando confirmação..."
+          );
           if (finalUserInput.toLowerCase() === "sim") {
+            console.log("Usuário confirmou. Criando evento...");
             await createEvent(
               calendarId,
               chosenSlot,
@@ -269,11 +301,13 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             responseText = "Sua consulta foi marcada com sucesso!";
             state = "FINISHED";
           } else {
+            console.log("Usuário não confirmou. Encerrando sem marcar.");
             responseText =
               "Ok, a consulta não foi marcada. Caso queira tentar novamente, diga 'Marcar Consulta'.";
             state = "FINISHED";
           }
         } else {
+          console.log("Estado desconhecido ou FINISHED. Encerrando fluxo.");
           responseText =
             "Não entendi sua solicitação. Por favor, diga 'Marcar Consulta' para recomeçar.";
           state = "FINISHED";
@@ -282,15 +316,19 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       }
 
       case "saudacoes_e_boas_vindas":
+        console.log("Intenção saudacoes_e_boas_vindas acionada.");
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
         break;
 
       case "introducao_alimentar":
+        console.log("Intenção introducao_alimentar acionada.");
         responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
         break;
 
       default:
-        console.log("Enviando mensagem para o ChatGPT...");
+        console.log(
+          "Intenção não mapeada, enviando mensagem para o ChatGPT..."
+        );
         console.log("Mensagem enviada:", finalUserInput);
         responseText = await getOpenAiCompletion(finalUserInput);
         console.log("Resposta do GPT:", responseText);
@@ -300,6 +338,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       fulfillmentText: responseText,
     };
 
+    console.log("Novo estado:", state);
     if (state !== "FINISHED") {
       responseJson.outputContexts = [
         {
@@ -316,10 +355,10 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         },
       ];
     } else {
-      // Ao finalizar, remove o contexto
       responseJson.outputContexts = [];
     }
 
+    console.log("Resposta enviada ao Dialogflow:", responseJson);
     if (!res.headersSent) {
       res.json(responseJson);
     }
@@ -333,10 +372,12 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
+    console.log("=== Requisição recebida no /webhook (Twilio) ===");
     if (
       !req.body ||
       (!req.body.From && !req.body.Body && !req.body.MediaUrl0)
     ) {
+      console.error("Requisição inválida. Faltam parâmetros obrigatórios.");
       res.status(400).send("Requisição inválida.");
       return;
     }
@@ -345,6 +386,11 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     const incomingMessage = req.body.Body || "";
     const audioUrl = req.body.MediaUrl0; // URL do áudio enviado pelo Twilio
     const sessionId = uuidv4();
+
+    console.log("From:", fromNumber);
+    console.log("Mensagem recebida do usuário:", incomingMessage);
+    console.log("Audio URL:", audioUrl);
+
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
 
@@ -363,25 +409,31 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Antes de enviar para o Dialogflow, verificamos se temos estado da conversa
-    // e se precisamos inserir o prefixo (Meu nome é, Meu e-mail é, Meu telefone é)
     const currentState = conversationStateMap[fromNumber]?.state || "";
+    console.log("Estado atual da conversa para o usuário:", currentState);
+
+    // Adiciona prefixo conforme o estado
     if (
       currentState === "AWAITING_NAME" &&
       !finalUserMessage.toLowerCase().includes("meu nome é")
     ) {
+      console.log("Inserindo prefixo para nome.");
       finalUserMessage = "Meu nome é " + finalUserMessage;
     } else if (
       currentState === "AWAITING_EMAIL" &&
       !finalUserMessage.toLowerCase().includes("meu e-mail é")
     ) {
+      console.log("Inserindo prefixo para e-mail.");
       finalUserMessage = "Meu e-mail é " + finalUserMessage;
     } else if (
       currentState === "AWAITING_PHONE" &&
       !finalUserMessage.toLowerCase().includes("meu telefone é")
     ) {
+      console.log("Inserindo prefixo para telefone.");
       finalUserMessage = "Meu telefone é " + finalUserMessage;
     }
+
+    console.log("Mensagem final enviada ao Dialogflow:", finalUserMessage);
 
     const dialogflowResponse = await axios.post(
       `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
@@ -393,17 +445,22 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       { headers: { Authorization: `Bearer ${accessToken.token}` } }
     );
 
+    console.log(
+      "Resposta do Dialogflow:",
+      JSON.stringify(dialogflowResponse.data, null, 2)
+    );
+
     const fullResponseMessage =
       dialogflowResponse.data.queryResult.fulfillmentText ||
       "Desculpe, não entendi.";
 
-    // Após receber a resposta do Dialogflow, atualizamos o state local
     const outputContexts =
       dialogflowResponse.data.queryResult.outputContexts || [];
     const flowContext = outputContexts.find((ctx: any) =>
       ctx.name.endsWith("marcar_consulta_flow")
     );
     let updatedState = flowContext?.parameters?.state || "";
+    console.log("Novo estado retornado pelo Dialogflow:", updatedState);
 
     // Salva o estado para a próxima mensagem do usuário
     conversationStateMap[fromNumber] = {
@@ -412,6 +469,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
     const partesMensagem = dividirMensagem(fullResponseMessage);
     for (const parte of partesMensagem) {
+      console.log("Enviando parte da mensagem ao usuário:", parte);
       const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
       const data = {
         To: fromNumber,
@@ -425,9 +483,10 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       });
     }
 
+    console.log("=== Resposta final enviada ao usuário via Twilio ===");
     res.status(200).send("Mensagem processada com sucesso.");
   } catch (error) {
-    console.error("Erro ao processar a mensagem:", error);
+    console.error("Erro ao processar a mensagem no /webhook:", error);
     res.status(500).send("Erro ao processar a mensagem.");
   }
 });
