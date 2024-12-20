@@ -19,6 +19,12 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 
+// Debug das variáveis de ambiente
+console.log("Watson Assistant Config:");
+console.log("ASSISTANT_ID:", WATSONX_ASSISTANT_ID);
+console.log("API_KEY:", WATSONX_API_KEY ? "OK" : "Missing");
+console.log("URL:", WATSONX_URL);
+
 // Função para dividir mensagens longas
 function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   const partes: string[] = [];
@@ -52,18 +58,31 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     }
 
     // Envio da mensagem para o Watsonx Assistant
-    const watsonResponse = await axios.post(
-      `${WATSONX_URL}/v1/assistants/${WATSONX_ASSISTANT_ID}/sessions/${sessionId}/message`,
-      {
-        input: { message_type: "text", text: finalUserMessage },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${WATSONX_API_KEY}`,
-          "Content-Type": "application/json",
+    let watsonResponse;
+    try {
+      watsonResponse = await axios.post(
+        `${WATSONX_URL}/v1/assistants/${WATSONX_ASSISTANT_ID}/sessions/${sessionId}/message`,
+        {
+          input: { message_type: "text", text: finalUserMessage },
         },
+        {
+          headers: {
+            Authorization: `Bearer ${WATSONX_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    } catch (error: any) {
+      console.error("Erro ao enviar mensagem para o Watson Assistant:");
+      if (error.response) {
+        console.error("Status:", error.response.status);
+        console.error("Data:", error.response.data);
+      } else {
+        console.error("Erro desconhecido:", error.message);
       }
-    );
+      res.status(500).send("Erro ao processar a mensagem no Watson Assistant.");
+      return;
+    }
 
     const fullResponseMessage =
       watsonResponse.data.output.generic
@@ -80,13 +99,17 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         Body: parte,
       };
 
-      await axios.post(url, qs.stringify(data), {
-        auth: {
-          username: TWILIO_ACCOUNT_SID || "",
-          password: TWILIO_AUTH_TOKEN || "",
-        },
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      });
+      try {
+        await axios.post(url, qs.stringify(data), {
+          auth: {
+            username: TWILIO_ACCOUNT_SID || "",
+            password: TWILIO_AUTH_TOKEN || "",
+          },
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        });
+      } catch (error) {
+        console.error("Erro ao enviar mensagem pelo Twilio:", error);
+      }
     }
 
     res.status(200).send("Mensagem processada com sucesso.");
