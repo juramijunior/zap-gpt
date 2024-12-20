@@ -40,11 +40,10 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     const fromNumber = req.body.From;
     const incomingMessage = req.body.Body || "";
     const audioUrl = req.body.MediaUrl0;
-    const sessionId = uuidv4();
 
     let finalUserMessage = incomingMessage;
 
-    // Transcrição do áudio
+    // Transcrição do áudio se houver
     if (audioUrl) {
       try {
         console.log(`Transcrevendo áudio da URL: ${audioUrl}`);
@@ -57,17 +56,47 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Envio da mensagem para o Watsonx Assistant
+    // Criação da sessão no Watson Assistant (v2)
+    let sessionId: string;
+    try {
+      const sessionResponse = await axios.post(
+        `${WATSONX_URL}/v2/assistants/${WATSONX_ASSISTANT_ID}/sessions`,
+        {},
+        {
+          headers: {
+            Authorization:
+              "Basic " +
+              Buffer.from(`apikey:${WATSONX_API_KEY}`).toString("base64"),
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      sessionId = sessionResponse.data.session_id;
+    } catch (error: any) {
+      console.error("Erro ao criar sessão com o Watson Assistant:");
+      if (error.response) {
+        console.error("Status:", error.response.status);
+        console.error("Data:", error.response.data);
+      } else {
+        console.error("Erro desconhecido:", error.message);
+      }
+      res.status(500).send("Erro ao criar sessão no Watson Assistant.");
+      return;
+    }
+
+    // Envio da mensagem para o Watson Assistant (v2)
     let watsonResponse;
     try {
       watsonResponse = await axios.post(
-        `${WATSONX_URL}/v1/assistants/${WATSONX_ASSISTANT_ID}/sessions/${sessionId}/message`,
+        `${WATSONX_URL}/v2/assistants/${WATSONX_ASSISTANT_ID}/sessions/${sessionId}/message`,
         {
           input: { message_type: "text", text: finalUserMessage },
         },
         {
           headers: {
-            Authorization: `Bearer ${WATSONX_API_KEY}`,
+            Authorization:
+              "Basic " +
+              Buffer.from(`apikey:${WATSONX_API_KEY}`).toString("base64"),
             "Content-Type": "application/json",
           },
         }
@@ -85,8 +114,8 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     }
 
     const fullResponseMessage =
-      watsonResponse.data.output.generic
-        .map((resp: any) => resp.text)
+      watsonResponse.data.output?.generic
+        ?.map((resp: any) => resp.text)
         .join("\n") || "Desculpe, não entendi.";
 
     // Enviar mensagens pelo Twilio
