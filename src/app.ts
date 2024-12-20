@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from "uuid";
 
 const toZonedTime = dateFnsTz.toZonedTime;
 const format = dateFnsTz.format;
+const userSessionMap: { [key: string]: string } = {};
 
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 if (!credentialsJson) {
@@ -385,7 +386,15 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     const fromNumber = req.body.From;
     const incomingMessage = req.body.Body || "";
     const audioUrl = req.body.MediaUrl0; // URL do áudio enviado pelo Twilio
-    const sessionId = uuidv4();
+    // Se já temos um sessionId para este usuário, use-o. Caso contrário, crie um novo.
+    let sessionId = userSessionMap[fromNumber];
+    if (!sessionId) {
+      sessionId = uuidv4();
+      userSessionMap[fromNumber] = sessionId;
+      console.log(`Novo sessionId criado para ${fromNumber}: ${sessionId}`);
+    } else {
+      console.log(`Reutilizando sessionId para ${fromNumber}: ${sessionId}`);
+    }
 
     console.log("From:", fromNumber);
     console.log("Mensagem recebida do usuário:", incomingMessage);
