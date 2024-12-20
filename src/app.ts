@@ -15,6 +15,9 @@ const WATSONX_ASSISTANT_ID = process.env.WATSONX_ASSISTANT_ID;
 const WATSONX_API_KEY = process.env.WATSONX_API_KEY;
 const WATSONX_URL = process.env.WATSONX_URL;
 
+// Defina a versão da API do Watson Assistant
+const WATSONX_VERSION = "2023-06-14";
+
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
@@ -56,11 +59,11 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Criação da sessão no Watson Assistant (v2)
+    // Criação da sessão no Watson Assistant (v2) com parâmetro version
     let sessionId: string;
     try {
       const sessionResponse = await axios.post(
-        `${WATSONX_URL}/v2/assistants/${WATSONX_ASSISTANT_ID}/sessions`,
+        `${WATSONX_URL}/v2/assistants/${WATSONX_ASSISTANT_ID}/sessions?version=${WATSONX_VERSION}`,
         {},
         {
           headers: {
@@ -84,11 +87,11 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Envio da mensagem para o Watson Assistant (v2)
+    // Envio da mensagem para o Watson Assistant (v2) com parâmetro version
     let watsonResponse;
     try {
       watsonResponse = await axios.post(
-        `${WATSONX_URL}/v2/assistants/${WATSONX_ASSISTANT_ID}/sessions/${sessionId}/message`,
+        `${WATSONX_URL}/v2/assistants/${WATSONX_ASSISTANT_ID}/sessions/${sessionId}/message?version=${WATSONX_VERSION}`,
         {
           input: { message_type: "text", text: finalUserMessage },
         },
