@@ -40,6 +40,9 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
+// Armazena o estado da conversa por número de telefone do usuário
+const conversationStateMap: { [key: string]: any } = {};
+
 function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   const partes: string[] = [];
   for (let i = 0; i < mensagem.length; i += tamanhoMax) {
@@ -170,14 +173,11 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   const userQuery = req.body.queryResult.queryText;
   const audioUrl = req.body.originalDetectIntentRequest?.payload?.audioUrl;
 
-  // Extrair contexto e parâmetros
   const outputContexts = req.body.queryResult.outputContexts || [];
-  // Buscamos o contexto marcar_consulta_flow
   const flowContext = outputContexts.find((ctx: any) =>
     ctx.name.endsWith("marcar_consulta_flow")
   );
 
-  // Ler parâmetros do contexto (ou padrão)
   let state = flowContext?.parameters?.state || "INITIAL";
   let chosenSlot = flowContext?.parameters?.chosenSlot || "";
   let clientName = flowContext?.parameters?.clientName || "";
@@ -188,7 +188,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
   let responseText = "Desculpe, não entendi sua solicitação.";
   let finalUserInput = userQuery;
 
-  // Transcrição de áudio se necessário
   if (audioUrl) {
     try {
       console.log("Áudio recebido. Iniciando transcrição...");
@@ -202,112 +201,92 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
 
   try {
     switch (intentName) {
-      case "Marcar Consulta":
-        // Aqui gerenciamos o fluxo usando o state
-        {
-          const calendarId = "jurami.junior@gmail.com";
-
-          // Se ainda não temos availableSlots, busque-os na fase INITIAL
-          if (state === "INITIAL") {
-            const fetchedSlots = await getAvailableSlots(calendarId);
-            if (fetchedSlots.length === 0) {
-              responseText =
-                "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
-              state = "FINISHED";
-            } else {
-              availableSlots = fetchedSlots.slice(0, 4);
-              responseText = `Os horários disponíveis são:\n${availableSlots
-                .map((s: string, i: number) => `${i + 1} - ${s}`)
-                .join(
-                  "\n"
-                )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
-              state = "AWAITING_SLOT_SELECTION";
-            }
-          } else if (state === "AWAITING_SLOT_SELECTION") {
-            // O usuário deve ter digitado um número (0 a 4)
-            const userNumber = parseInt(finalUserInput, 10);
-            if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
-              if (userNumber === 0) {
-                responseText =
-                  "Ok, vamos cadastrar a consulta manualmente. Por favor, informe a data e horário desejado (no formato DD/MM/YYYY HH:mm).";
-                state = "AWAITING_MANUAL_DATE_TIME";
-              } else {
-                const slotIndex = userNumber - 1;
-                if (slotIndex >= 0 && slotIndex < availableSlots.length) {
-                  chosenSlot = availableSlots[slotIndex];
-                  responseText =
-                    "Ótimo! Agora, por favor, informe o seu nome completo.";
-                  state = "AWAITING_NAME";
-                } else {
-                  responseText =
-                    "Opção inválida. Por favor, escolha um número válido.";
-                }
-              }
-            } else {
-              responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
-            }
-          } else if (state === "AWAITING_MANUAL_DATE_TIME") {
-            // Usuário forneceu a data/hora manualmente
-            chosenSlot = finalUserInput;
+      case "Marcar Consulta": {
+        const calendarId = "jurami.junior@gmail.com";
+        if (state === "INITIAL") {
+          const fetchedSlots = await getAvailableSlots(calendarId);
+          if (fetchedSlots.length === 0) {
             responseText =
-              "Certo, agora, por favor, informe o seu nome completo.";
-            state = "AWAITING_NAME";
-          } else if (state === "AWAITING_NAME") {
-            clientName = finalUserInput;
-            responseText = "Agora, informe seu e-mail, por favor.";
-            state = "AWAITING_EMAIL";
-          } else if (state === "AWAITING_EMAIL") {
-            clientEmail = finalUserInput;
-            responseText = "Agora, informe seu número de telefone, por favor.";
-            state = "AWAITING_PHONE";
-          } else if (state === "AWAITING_PHONE") {
-            clientPhone = finalUserInput;
-            // Mostrar resumo e pedir confirmação
-            responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
-            state = "AWAITING_CONFIRMATION";
-          } else if (state === "AWAITING_CONFIRMATION") {
-            if (finalUserInput.toLowerCase() === "sim") {
-              await createEvent(
-                calendarId,
-                chosenSlot,
-                clientName,
-                clientEmail,
-                clientPhone
-              );
-              responseText = "Sua consulta foi marcada com sucesso!";
-              state = "FINISHED";
-            } else {
+              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+            state = "FINISHED";
+          } else {
+            availableSlots = fetchedSlots.slice(0, 4);
+            responseText = `Os horários disponíveis são:\n${availableSlots
+              .map((s: string, i: number) => `${i + 1} - ${s}`)
+              .join(
+                "\n"
+              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
+            state = "AWAITING_SLOT_SELECTION";
+          }
+        } else if (state === "AWAITING_SLOT_SELECTION") {
+          const userNumber = parseInt(finalUserInput, 10);
+          if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
+            if (userNumber === 0) {
               responseText =
-                "Ok, a consulta não foi marcada. Caso queira tentar novamente, diga 'Marcar Consulta'.";
-              state = "FINISHED";
+                "Ok, vamos cadastrar a consulta manualmente. Por favor, informe a data e horário desejado (no formato DD/MM/YYYY HH:mm).";
+              state = "AWAITING_MANUAL_DATE_TIME";
+            } else {
+              const slotIndex = userNumber - 1;
+              if (slotIndex >= 0 && slotIndex < availableSlots.length) {
+                chosenSlot = availableSlots[slotIndex];
+                responseText =
+                  "Ótimo! Agora, por favor, informe o seu nome completo.";
+                state = "AWAITING_NAME";
+              } else {
+                responseText =
+                  "Opção inválida. Por favor, escolha um número válido.";
+              }
             }
           } else {
-            // Estado final ou desconhecido
+            responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
+          }
+        } else if (state === "AWAITING_MANUAL_DATE_TIME") {
+          chosenSlot = finalUserInput;
+          responseText =
+            "Certo, agora, por favor, informe o seu nome completo.";
+          state = "AWAITING_NAME";
+        } else if (state === "AWAITING_NAME") {
+          clientName = finalUserInput;
+          responseText = "Agora, informe seu e-mail, por favor.";
+          state = "AWAITING_EMAIL";
+        } else if (state === "AWAITING_EMAIL") {
+          clientEmail = finalUserInput;
+          responseText = "Agora, informe seu número de telefone, por favor.";
+          state = "AWAITING_PHONE";
+        } else if (state === "AWAITING_PHONE") {
+          clientPhone = finalUserInput;
+          responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
+          state = "AWAITING_CONFIRMATION";
+        } else if (state === "AWAITING_CONFIRMATION") {
+          if (finalUserInput.toLowerCase() === "sim") {
+            await createEvent(
+              calendarId,
+              chosenSlot,
+              clientName,
+              clientEmail,
+              clientPhone
+            );
+            responseText = "Sua consulta foi marcada com sucesso!";
+            state = "FINISHED";
+          } else {
             responseText =
-              "Não entendi sua solicitação. Por favor, diga 'Marcar Consulta' para recomeçar.";
+              "Ok, a consulta não foi marcada. Caso queira tentar novamente, diga 'Marcar Consulta'.";
             state = "FINISHED";
           }
+        } else {
+          responseText =
+            "Não entendi sua solicitação. Por favor, diga 'Marcar Consulta' para recomeçar.";
+          state = "FINISHED";
         }
         break;
-
-      // Mantemos suas outras intents conforme necessário
-      case "Horários Disponíveis":
-        // ... (código original desta intent, se ainda necessário)
-        responseText = "Você pode agora dizer 'Marcar Consulta' para iniciar.";
-        break;
-
-      case "Selecionar Horário":
-        // ... (Se não for mais necessário, pode remover)
-        responseText =
-          "Agora usamos o fluxo na mesma intent, não use mais esta.";
-        break;
+      }
 
       case "saudacoes_e_boas_vindas":
-        responseText = `Seja bem-vinda(o) ... (mensagem original)`;
+        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
         break;
 
       case "introducao_alimentar":
-        responseText = `Explicação sobre introdução alimentar ... (mensagem original)`;
+        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
         break;
 
       default:
@@ -317,12 +296,10 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         console.log("Resposta do GPT:", responseText);
     }
 
-    // Montar a resposta com contexto
     const responseJson: any = {
       fulfillmentText: responseText,
     };
 
-    // Se não tiver acabado o fluxo, manter o contexto
     if (state !== "FINISHED") {
       responseJson.outputContexts = [
         {
@@ -339,7 +316,7 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         },
       ];
     } else {
-      // Ao finalizar, removemos o contexto para encerrar o fluxo
+      // Ao finalizar, remove o contexto
       responseJson.outputContexts = [];
     }
 
@@ -373,6 +350,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
     let finalUserMessage = incomingMessage;
 
+    // Verifica se é áudio e transcreve
     if (audioUrl) {
       try {
         console.log(`Áudio detectado. Transcrevendo áudio da URL: ${audioUrl}`);
@@ -383,6 +361,26 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         res.status(500).send("Erro ao processar o áudio enviado.");
         return;
       }
+    }
+
+    // Antes de enviar para o Dialogflow, verificamos se temos estado da conversa
+    // e se precisamos inserir o prefixo (Meu nome é, Meu e-mail é, Meu telefone é)
+    const currentState = conversationStateMap[fromNumber]?.state || "";
+    if (
+      currentState === "AWAITING_NAME" &&
+      !finalUserMessage.toLowerCase().includes("meu nome é")
+    ) {
+      finalUserMessage = "Meu nome é " + finalUserMessage;
+    } else if (
+      currentState === "AWAITING_EMAIL" &&
+      !finalUserMessage.toLowerCase().includes("meu e-mail é")
+    ) {
+      finalUserMessage = "Meu e-mail é " + finalUserMessage;
+    } else if (
+      currentState === "AWAITING_PHONE" &&
+      !finalUserMessage.toLowerCase().includes("meu telefone é")
+    ) {
+      finalUserMessage = "Meu telefone é " + finalUserMessage;
     }
 
     const dialogflowResponse = await axios.post(
@@ -398,6 +396,19 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     const fullResponseMessage =
       dialogflowResponse.data.queryResult.fulfillmentText ||
       "Desculpe, não entendi.";
+
+    // Após receber a resposta do Dialogflow, atualizamos o state local
+    const outputContexts =
+      dialogflowResponse.data.queryResult.outputContexts || [];
+    const flowContext = outputContexts.find((ctx: any) =>
+      ctx.name.endsWith("marcar_consulta_flow")
+    );
+    let updatedState = flowContext?.parameters?.state || "";
+
+    // Salva o estado para a próxima mensagem do usuário
+    conversationStateMap[fromNumber] = {
+      state: updatedState,
+    };
 
     const partesMensagem = dividirMensagem(fullResponseMessage);
     for (const parte of partesMensagem) {
