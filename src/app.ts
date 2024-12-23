@@ -184,48 +184,87 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   const sessionId = sessionPath.split("/").pop() || "";
   const userQuery = req.body.queryResult.queryText;
   console.log("Texto do usuário:", userQuery);
+  const audioUrl = req.body.originalDetectIntentRequest?.payload?.audioUrl;
+
   const outputContexts = req.body.queryResult.outputContexts || [];
   const flowContext = outputContexts.find((ctx: any) =>
     ctx.name.endsWith("marcar_consulta_flow")
   );
 
   let state = flowContext?.parameters?.state || "INITIAL";
+  let chosenSlot = flowContext?.parameters?.chosenSlot || "";
   let clientName = flowContext?.parameters?.clientName || "";
   let clientEmail = flowContext?.parameters?.clientEmail || "";
   let clientPhone = flowContext?.parameters?.clientPhone || "";
-  let chosenSlot = flowContext?.parameters?.chosenSlot || "";
   let availableSlots = flowContext?.parameters?.availableSlots || [];
-  let responseText = "";
+
+  console.log("Estado atual:", state);
+
+  let responseText = "Desculpe, não entendi sua solicitação.";
+  let finalUserInput = userQuery;
+
+  if (audioUrl) {
+    try {
+      console.log("Áudio recebido. Iniciando transcrição...");
+      finalUserInput = await transcribeAudio(audioUrl);
+      console.log("Transcrição concluída:", finalUserInput);
+    } catch (audioError) {
+      console.error("Erro ao transcrever o áudio:", audioError);
+      responseText = "Não consegui entender o áudio enviado. Tente novamente.";
+    }
+  }
 
   try {
     switch (intentName) {
       case "Marcar Consulta": {
         const calendarId = "jurami.junior@gmail.com";
+        let currentSlotIndex = flowContext?.parameters?.currentSlotIndex || 0; // Índice para controlar os slots já exibidos
+
         if (state === "INITIAL") {
           console.log("Estado INITIAL. Buscando horários disponíveis...");
           const fetchedSlots = await getAvailableSlots(calendarId);
+
           if (fetchedSlots.length === 0) {
             responseText =
               "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
             state = "FINISHED";
           } else {
             availableSlots = fetchedSlots.slice(0, 4);
+            currentSlotIndex = 4; // Atualiza para o próximo grupo de horários
             responseText = `Os horários disponíveis são:\n${availableSlots
               .map((s: string, i: number) => `${i + 1} - ${s}`)
               .join(
                 "\n"
-              )}\n\nPor favor, responda com o número do horário desejado. Caso queira cadastrar uma consulta manualmente, responda com 0.`;
+              )}\n\nPor favor, responda com o número do horário desejado. Caso queira consultar mais horários, responda com 0.`;
             state = "AWAITING_SLOT_SELECTION";
           }
         } else if (state === "AWAITING_SLOT_SELECTION") {
           const userNumber = parseInt(userQuery, 10);
+
           if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
             if (userNumber === 0) {
-              responseText =
-                "Ok, vamos cadastrar a consulta manualmente. Por favor, informe a data e horário desejado (no formato DD/MM/YYYY HH:mm).";
-              state = "AWAITING_MANUAL_DATE_TIME";
+              console.log("Usuário solicitou mais horários.");
+
+              const fetchedSlots = await getAvailableSlots(calendarId);
+
+              if (currentSlotIndex >= fetchedSlots.length) {
+                responseText =
+                  "Não há mais horários disponíveis. Por favor, escolha um dos horários exibidos anteriormente.";
+              } else {
+                availableSlots = fetchedSlots.slice(
+                  currentSlotIndex,
+                  currentSlotIndex + 4
+                );
+                currentSlotIndex += 4; // Atualiza para o próximo grupo de horários
+                responseText = `Os próximos horários disponíveis são:\n${availableSlots
+                  .map((s: string, i: number) => `${i + 1} - ${s}`)
+                  .join(
+                    "\n"
+                  )}\n\nPor favor, responda com o número do horário desejado. Caso queira consultar mais horários, responda com 0.`;
+              }
             } else {
               const slotIndex = userNumber - 1;
+
               if (slotIndex >= 0 && slotIndex < availableSlots.length) {
                 chosenSlot = availableSlots[slotIndex];
                 responseText =
@@ -237,7 +276,8 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
               }
             }
           } else {
-            responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
+            responseText =
+              "Por favor, responda com um número de 1 a 4 ou 0 para consultar mais horários.";
           }
         } else if (state === "AWAITING_MANUAL_DATE_TIME") {
           chosenSlot = userQuery;
@@ -273,7 +313,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
           if (!phoneMatch || !phoneMatch[1]) {
             responseText =
-              "Por favor, informe um número de telefone válido no formato correto. Exemplo: 'Meu telefone é 61999458613'.";
+              "Por favor, informe um número de telefone válido. Exemplo: 'Meu telefone é 61999458613'.";
           } else {
             clientPhone = phoneMatch[1].trim();
             responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
@@ -307,6 +347,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       }
 
       case "Default Fallback Intent": {
+        console.log("Caiu no fallback intent. Verificando tentativas.");
         const systemContext = outputContexts.find((ctx: any) =>
           ctx.name.endsWith("__system_counters__")
         );
@@ -323,26 +364,35 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       }
 
       default:
-        responseText = await getOpenAiCompletion(userQuery);
+        responseText = await getOpenAiCompletion(finalUserInput);
+        console.log("Resposta do GPT:", responseText);
     }
 
-    res.json({
+    const responseJson: any = {
       fulfillmentText: responseText,
-      outputContexts: [
+    };
+
+    if (state !== "FINISHED") {
+      responseJson.outputContexts = [
         {
           name: `${sessionPath}/contexts/marcar_consulta_flow`,
-          lifespanCount: state === "FINISHED" ? 0 : 5,
+          lifespanCount: 5,
           parameters: {
             state,
+            chosenSlot,
             clientName,
             clientEmail,
             clientPhone,
-            chosenSlot,
             availableSlots,
           },
         },
-      ],
-    });
+      ];
+    } else {
+      responseJson.outputContexts = [];
+    }
+
+    console.log("Resposta enviada ao Dialogflow:", responseJson);
+    res.json(responseJson);
   } catch (error) {
     console.error("Erro no Fulfillment:", error);
     res.status(500).send("Erro ao processar a intenção.");
