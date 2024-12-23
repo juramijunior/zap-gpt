@@ -345,6 +345,64 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
         }
         break;
       }
+
+      case "saudacoes_e_boas_vindas":
+        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
+        break;
+
+      case "introducao_alimentar":
+        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
+        break;
+
+      case "acompanhamento_gestante":
+        responseText = `Deixa eu te explicar como funciona o pré natal nutricional da Dra Sabrina \n\n A Dra Sabrina vai te ajudar a conduzir a sua gestação de forma saudável, mas sem complicar a sua rotina e sem mudanças radicais na sua alimentação.\n\n O foco do acompanhamento nutricional será no ganho de peso recomendado para o trimestre, no crescimento do bebê e na redução das chances de desenvolver complicações gestacionais. \n\n Além disso, ela prescreve toda a suplementação necessária durante a gestação, de acordo com o trimestre, com as necessidade da mamãe e do bebê, e sempre levando em consideração os resultados dos exames. \n\n Antes da primeira consulta será enviado um questionário, para que a Dra possa entender melhor as suas particularidades e, durante a consulta, consiga priorizar as questões mais importantes. \n\n Na primeira consulta, que dura em torno de 1h, ela vai te ouvir para poder entender a sua rotina e se aprofundar nas suas necessidades. \n\n Será aferido o seu peso, altura, circunferências e dobras cutâneas, para concluir seu Diagnóstico Nutricional e acompanhar a sua evolução de ganho de peso durante a gestação \n\n Pelos próximos 30 dias após a consulta, você conta com a facilidade de acessar todo o material da consulta (plano alimentar, receitas e prescrições, orientações, pedidos de exame, etc) pelo aplicativo da Dra. Sabrina.  \n\n O seu acompanhamento será feito pelo chat do app. Uma vez por semana durante os 30 dias, a Dra acessa o chat responder a todas as suas dúvidas.`;
+        break;
+
+      case "Consultar Consultas Marcadas": {
+        console.log("Intenção 'Consultar Consultas Marcadas' acionada.");
+        const consultasMarcadas = await getBookedAppointments(
+          "jurami.junior@gmail.com"
+        );
+
+        if (consultasMarcadas.length === 0) {
+          responseText = "Você não possui consultas marcadas no momento.";
+          state = "FINISHED";
+        } else {
+          responseText = `Suas consultas marcadas:\n${consultasMarcadas
+            .map((consulta, index) => `${index + 1} - ${consulta.description}`)
+            .join("\n")}`;
+        }
+        break;
+      }
+
+      case "Desmarcar Consultas": {
+        console.log("Intenção 'Desmarcar Consulta' acionada.");
+        const consultasMarcadas: { id: string; description: string }[] =
+          await getBookedAppointments("jurami.junior@gmail.com");
+
+        if (consultasMarcadas.length === 0) {
+          responseText = "Você não possui consultas marcadas no momento.";
+          state = "FINISHED";
+        } else {
+          const availableSlots: { id: string; description: string }[] =
+            consultasMarcadas.map(
+              (consulta: { id: string; description: string }) => ({
+                id: consulta.id,
+                description: consulta.description,
+              })
+            );
+
+          responseText = `Selecione a consulta que deseja desmarcar:\n${availableSlots
+            .map(
+              (slot: { id: string; description: string }, index: number) =>
+                `${index + 1} - ${slot.description}`
+            )
+            .join("\n")}\n\nResponda com o número correspondente.`;
+          state = "AWAITING_CANCEL_SELECTION";
+        }
+        break;
+      }
+
       default: {
         console.log(
           "Intenção não mapeada, enviando mensagem para o ChatGPT..."
