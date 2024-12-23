@@ -372,6 +372,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             "Por favor, informe o seu e-mail para que possamos buscar suas consultas marcadas.";
           state = "AWAITING_CLIENT_EMAIL";
         } else if (state === "AWAITING_CLIENT_EMAIL") {
+          // Verifica se o texto enviado pelo usuário contém um e-mail válido
           const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
           const emailMatch = userQuery.match(emailPattern);
 
@@ -379,7 +380,10 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             responseText =
               "E-mail inválido. Por favor, informe um e-mail no formato correto.";
           } else {
-            const clientEmail = emailMatch[1].trim();
+            clientEmail = emailMatch[1].trim(); // Extrai o e-mail válido
+            console.log("E-mail recebido:", clientEmail);
+
+            // Busca consultas com base no e-mail
             const consultasMarcadas = await getBookedAppointments(
               "jurami.junior@gmail.com",
               clientEmail
@@ -486,9 +490,9 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           lifespanCount: state === "FINISHED" ? 0 : 5,
           parameters: {
             state,
+            clientEmail,
             chosenSlot,
             clientName,
-            clientEmail,
             clientPhone,
             availableSlots,
             currentIndex,
