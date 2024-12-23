@@ -7,7 +7,7 @@ import { GoogleAuth } from "google-auth-library";
 import { google } from "googleapis";
 import * as dateFnsTz from "date-fns-tz";
 import qs from "qs";
-import { transcribeAudio, getOpenAiCompletion } from "./services/openai";
+import { transcribeAudio } from "./services/openai";
 import { v4 as uuidv4 } from "uuid";
 
 const toZonedTime = dateFnsTz.toZonedTime;
@@ -41,7 +41,6 @@ app.use(bodyParser.json());
 
 const calendar = google.calendar({ version: "v3", auth });
 
-// Armazena o estado da conversa por número de telefone do usuário
 const conversationStateMap: { [key: string]: any } = {};
 
 function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
@@ -63,7 +62,6 @@ async function getAvailableSlots(
   endDate.setDate(startDate.getDate() + weeksToSearch * 7);
 
   try {
-    console.log("Obtendo horários disponíveis do Google Calendar...");
     const response = await calendar.events.list({
       calendarId,
       timeMin: startDate.toISOString(),
@@ -73,8 +71,6 @@ async function getAvailableSlots(
     });
 
     const events = response.data.items || [];
-    console.log(`Eventos obtidos: ${events.length}`);
-
     const freeSlots: string[] = [];
     let currentDate = toZonedTime(startDate, timeZone);
 
@@ -131,11 +127,40 @@ async function getAvailableSlots(
       currentDate = toZonedTime(currentDate, timeZone);
     }
 
-    console.log(`Horários disponíveis encontrados: ${freeSlots.length}`);
     return freeSlots;
   } catch (error) {
-    console.error("Erro ao buscar horários disponíveis:", error);
     throw new Error("Erro ao buscar horários disponíveis");
+  }
+}
+
+async function getBookedAppointments(
+  calendarId: string
+): Promise<{ id: string; description: string }[]> {
+  const response = await calendar.events.list({
+    calendarId,
+    timeMin: new Date().toISOString(),
+    singleEvents: true,
+    orderBy: "startTime",
+  });
+
+  const events = response.data.items || [];
+  return events.map((event) => ({
+    id: event.id || "",
+    description: event.summary || "Sem descrição",
+  }));
+}
+
+async function deleteAppointment(
+  calendarId: string,
+  eventId: string
+): Promise<void> {
+  try {
+    await calendar.events.delete({
+      calendarId,
+      eventId,
+    });
+  } catch (error) {
+    throw new Error("Erro ao remover consulta.");
   }
 }
 
@@ -146,7 +171,6 @@ async function createEvent(
   clientEmail: string,
   clientPhone: string
 ) {
-  console.log("Criando evento no Google Calendar...");
   const timeZone = "America/Sao_Paulo";
   const [datePart, timePart] = chosenSlot.split(" ");
   const [day, month, year] = datePart.split("/");
@@ -165,28 +189,23 @@ async function createEvent(
   };
 
   try {
-    const insertResp = await calendar.events.insert({
+    await calendar.events.insert({
       calendarId,
       requestBody: event,
     });
-    console.log("Evento criado com sucesso:", insertResp.data);
   } catch (err) {
-    console.error("Erro ao criar evento no Google Calendar:", err);
     throw err;
   }
 }
 
-app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
-  console.log("=== Fulfillment recebido do Dialogflow ===");
+app.post("/fulfillment", async (req, res) => {
   const intentName = req.body.queryResult.intent.displayName;
-  console.log("Intenção disparada:", intentName);
-  const sessionPath: string = req.body.session || "";
+  const sessionPath = req.body.session || "";
   const sessionId = sessionPath.split("/").pop() || "";
   const userQuery = req.body.queryResult.queryText;
-  console.log("Texto do usuário:", userQuery);
 
   const outputContexts = req.body.queryResult.outputContexts || [];
-  const flowContext = outputContexts.find((ctx: any) =>
+  const flowContext = outputContexts.find((ctx) =>
     ctx.name.endsWith("marcar_consulta_flow")
   );
 
@@ -196,9 +215,6 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   let clientEmail = flowContext?.parameters?.clientEmail || "";
   let clientPhone = flowContext?.parameters?.clientPhone || "";
   let availableSlots = flowContext?.parameters?.availableSlots || [];
-  let currentIndex = flowContext?.parameters?.currentIndex || 0;
-
-  console.log("Estado atual:", state);
 
   let responseText = "Desculpe, não entendi sua solicitação.";
 
@@ -206,102 +222,72 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
     switch (intentName) {
       case "Marcar Consulta": {
         const calendarId = "jurami.junior@gmail.com";
-
         if (state === "INITIAL") {
-          console.log("Estado INITIAL. Buscando horários disponíveis...");
           const fetchedSlots = await getAvailableSlots(calendarId);
-
           if (fetchedSlots.length === 0) {
-            responseText =
-              "Não há horários disponíveis no momento. Por favor, tente novamente mais tarde.";
+            responseText = "Não há horários disponíveis no momento.";
             state = "FINISHED";
           } else {
             availableSlots = fetchedSlots.slice(0, 4);
-            currentIndex = 4;
             responseText = `Os horários disponíveis são:\n${availableSlots
-              .map((s: string, i: number) => `${i + 1} - ${s}`)
+              .map((s, i) => `${i + 1} - ${s}`)
               .join(
                 "\n"
-              )}\n\nPor favor, responda com o número do horário desejado. Caso queira consultar mais horários, responda com 0.`;
+              )}\n\nResponda com o número do horário desejado ou 0 para mais opções.`;
             state = "AWAITING_SLOT_SELECTION";
           }
         } else if (state === "AWAITING_SLOT_SELECTION") {
           const userNumber = parseInt(userQuery, 10);
-
-          if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
-            if (userNumber === 0) {
-              console.log("Usuário pediu mais horários.");
-              const fetchedSlots = await getAvailableSlots(calendarId);
-              const nextSlots = fetchedSlots.slice(
-                currentIndex,
-                currentIndex + 4
-              );
-
-              if (nextSlots.length === 0) {
-                responseText = "Não há mais horários disponíveis.";
-              } else {
-                availableSlots = nextSlots;
-                currentIndex += 4;
-                responseText = `Os próximos horários disponíveis são:\n${availableSlots
-                  .map((s: string, i: number) => `${i + 1} - ${s}`)
-                  .join(
-                    "\n"
-                  )}\n\nPor favor, responda com o número do horário desejado ou 0 para consultar mais horários.`;
-              }
+          if (userNumber === 0) {
+            const currentIndex = availableSlots.length;
+            const fetchedSlots = await getAvailableSlots(calendarId);
+            const nextSlots = fetchedSlots.slice(
+              currentIndex,
+              currentIndex + 4
+            );
+            if (nextSlots.length > 0) {
+              availableSlots = availableSlots.concat(nextSlots);
+              responseText = `Próximos horários disponíveis:\n${nextSlots
+                .map((s, i) => `${currentIndex + i + 1} - ${s}`)
+                .join("\n")}\n\nEscolha um horário ou responda 0 para mais.`;
             } else {
-              const slotIndex = userNumber - 1;
-              if (slotIndex >= 0 && slotIndex < availableSlots.length) {
-                chosenSlot = availableSlots[slotIndex];
-                console.log("Horário escolhido:", chosenSlot);
-                responseText =
-                  "Ótimo! Agora, por favor, informe o seu nome completo.";
-                state = "AWAITING_NAME";
-              } else {
-                responseText =
-                  "Opção inválida. Por favor, escolha um número válido.";
-              }
+              responseText = "Não há mais horários disponíveis.";
             }
+          } else if (userNumber > 0 && userNumber <= availableSlots.length) {
+            const slotIndex = userNumber - 1;
+            chosenSlot = availableSlots[slotIndex];
+            responseText = "Ótimo! Agora informe seu nome completo.";
+            state = "AWAITING_NAME";
           } else {
-            responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
+            responseText = "Opção inválida. Escolha um número válido.";
           }
         } else if (state === "AWAITING_NAME") {
-          const isName = /^[a-zA-ZÀ-ÿ\s']+$/.test(userQuery.trim());
-          if (!isName) {
-            responseText =
-              "Por favor, informe um nome válido. Exemplo: 'Meu nome é João Silva'.";
-          } else {
-            clientName = userQuery.replace(/meu nome é/i, "").trim();
-            responseText = `Obrigada, ${clientName}. Agora, informe o seu e-mail.`;
-            state = "AWAITING_EMAIL";
-          }
+          clientName = userQuery.trim().replace(/^Meu nome é\s*/i, "");
+          responseText = `Obrigada, ${clientName}. Informe o e-mail.`;
+          state = "AWAITING_EMAIL";
         } else if (state === "AWAITING_EMAIL") {
           const emailPattern =
             /meu e-mail é\s*([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
           const emailMatch = userQuery.match(emailPattern);
-
-          if (!emailMatch || !emailMatch[1]) {
-            responseText =
-              "Por favor, informe um e-mail válido no formato correto. Exemplo: 'Meu e-mail é exemplo@dominio.com'.";
-          } else {
-            clientEmail = emailMatch[1].trim();
-            responseText = "Agora, informe seu número de telefone, por favor.";
+          if (emailMatch) {
+            clientEmail = emailMatch[1];
+            responseText = "Agora informe seu telefone.";
             state = "AWAITING_PHONE";
+          } else {
+            responseText = "Informe um e-mail válido no formato correto.";
           }
         } else if (state === "AWAITING_PHONE") {
           const phonePattern = /meu telefone é\s*(\d{10,15})/i;
           const phoneMatch = userQuery.match(phonePattern);
-
-          if (!phoneMatch || !phoneMatch[1]) {
-            responseText =
-              "Por favor, informe um número de telefone válido no formato correto. Exemplo: 'Meu telefone é 61999458613'.";
-          } else {
-            clientPhone = phoneMatch[1].trim();
-            responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
+          if (phoneMatch) {
+            clientPhone = phoneMatch[1];
+            responseText = `Confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nHorário: ${chosenSlot}\n\nConfirma? (sim/não)`;
             state = "AWAITING_CONFIRMATION";
+          } else {
+            responseText = "Informe um telefone válido no formato correto.";
           }
         } else if (state === "AWAITING_CONFIRMATION") {
           if (userQuery.toLowerCase() === "sim") {
-            console.log("Usuário confirmou. Criando evento...");
             await createEvent(
               calendarId,
               chosenSlot,
@@ -309,35 +295,57 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
               clientEmail,
               clientPhone
             );
-            responseText = "Sua consulta foi marcada com sucesso!";
-            state = "FINISHED";
-          } else if (userQuery.toLowerCase() === "não") {
-            responseText =
-              "Consulta cancelada. Caso deseje marcar novamente, diga 'Marcar Consulta'.";
+            responseText = "Consulta marcada com sucesso!";
             state = "FINISHED";
           } else {
-            responseText =
-              "Por favor, responda apenas com 'Sim' para confirmar ou 'Não' para cancelar.";
+            responseText = "Consulta cancelada. Reinicie se necessário.";
+            state = "FINISHED";
           }
         }
         break;
       }
 
-      case "Default Fallback Intent": {
-        console.log("Caiu no fallback intent. Resetando contexto.");
-        responseText =
-          "Não entendi suas respostas. Vamos recomeçar. Por favor, diga 'Marcar Consulta' para iniciar novamente.";
-        state = "INITIAL";
+      case "Consultar Consultas Marcadas": {
+        const consultasMarcadas = await getBookedAppointments(
+          "jurami.junior@gmail.com"
+        );
+        if (consultasMarcadas.length === 0) {
+          responseText = "Você não possui consultas marcadas.";
+          state = "FINISHED";
+        } else {
+          responseText = `Consultas:\n${consultasMarcadas
+            .map((c, i) => `${i + 1} - ${c.description}`)
+            .join("\n")}`;
+        }
         break;
       }
 
-      default: {
-        responseText = "Desculpe, não entendi sua solicitação.";
+      case "Desmarcar Consultas": {
+        const consultasMarcadas = await getBookedAppointments(
+          "jurami.junior@gmail.com"
+        );
+        if (consultasMarcadas.length === 0) {
+          responseText = "Você não possui consultas para desmarcar.";
+          state = "FINISHED";
+        } else {
+          const availableSlots = consultasMarcadas.map((c, i) => ({
+            id: c.id,
+            description: c.description,
+          }));
+          responseText = `Escolha para desmarcar:\n${availableSlots
+            .map((slot, i) => `${i + 1} - ${slot.description}`)
+            .join("\n")}\n\nResponda com o número.`;
+          state = "AWAITING_CANCEL_SELECTION";
+        }
         break;
       }
+
+      default:
+        responseText = "Não entendi sua solicitação.";
+        state = "FINISHED";
     }
 
-    const responseJson: any = {
+    const responseJson = {
       fulfillmentText: responseText,
       outputContexts: [
         {
@@ -350,16 +358,13 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             clientEmail,
             clientPhone,
             availableSlots,
-            currentIndex,
           },
         },
       ],
     };
 
-    console.log("Resposta enviada ao Dialogflow:", responseJson);
     res.json(responseJson);
   } catch (error) {
-    console.error("Erro no Fulfillment:", error);
     res.status(500).send("Erro ao processar a intenção.");
   }
 });
