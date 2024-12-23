@@ -211,8 +211,6 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
     } catch (audioError) {
       console.error("Erro ao transcrever o áudio:", audioError);
       responseText = "Não consegui entender o áudio enviado. Tente novamente.";
-      res.json({ fulfillmentText: responseText });
-      return;
     }
   }
 
@@ -238,6 +236,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             state = "AWAITING_SLOT_SELECTION";
           }
         } else if (state === "AWAITING_SLOT_SELECTION") {
+          console.log("Estado AWAITING_SLOT_SELECTION. Verificando número...");
           const userNumber = parseInt(finalUserInput, 10);
           if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
             if (userNumber === 0) {
@@ -260,27 +259,48 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           } else {
             responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
           }
+        } else if (state === "AWAITING_MANUAL_DATE_TIME") {
+          console.log(
+            "Estado AWAITING_MANUAL_DATE_TIME. Armazenando data/hora manual..."
+          );
+          chosenSlot = finalUserInput;
+          console.log("Data/hora manual:", chosenSlot);
+          responseText =
+            "Certo, agora, por favor, informe o seu nome completo.";
+          state = "AWAITING_NAME";
         } else if (state === "AWAITING_NAME") {
           const isName = /^[a-zA-ZÀ-ÿ\s']+$/.test(finalUserInput.trim());
           if (!isName) {
             responseText =
               "Por favor, informe um nome válido. Exemplo: 'Meu nome é João Silva'.";
-            res.json({ fulfillmentText: responseText });
-            return;
+          } else {
+            clientName = finalUserInput.trim();
+            responseText = `Obrigada, ${clientName}. Agora, informe o seu e-mail.`;
+            state = "AWAITING_EMAIL";
           }
-          clientName = finalUserInput.trim();
-          responseText = `Obrigada, ${clientName}. Agora, informe o seu e-mail.`;
-          state = "AWAITING_EMAIL";
         } else if (state === "AWAITING_EMAIL") {
-          clientEmail = finalUserInput.trim();
-          responseText = "Agora, informe seu número de telefone, por favor.";
-          state = "AWAITING_PHONE";
+          const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+            finalUserInput
+          );
+          if (!isValidEmail) {
+            responseText = "Por favor, informe um e-mail válido.";
+          } else {
+            clientEmail = finalUserInput;
+            responseText = "Agora, informe seu número de telefone, por favor.";
+            state = "AWAITING_PHONE";
+          }
         } else if (state === "AWAITING_PHONE") {
-          clientPhone = finalUserInput.trim();
-          responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
-          state = "AWAITING_CONFIRMATION";
+          const isValidPhone = /^\d{10,15}$/.test(finalUserInput);
+          if (!isValidPhone) {
+            responseText = "Por favor, informe um número de telefone válido.";
+          } else {
+            clientPhone = finalUserInput;
+            responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
+            state = "AWAITING_CONFIRMATION";
+          }
         } else if (state === "AWAITING_CONFIRMATION") {
           if (finalUserInput.toLowerCase() === "sim") {
+            console.log("Usuário confirmou. Criando evento...");
             await createEvent(
               calendarId,
               chosenSlot,
@@ -291,11 +311,13 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             responseText = "Sua consulta foi marcada com sucesso!";
             state = "FINISHED";
           } else {
+            console.log("Usuário não confirmou. Encerrando sem marcar.");
             responseText =
               "Ok, a consulta não foi marcada. Caso queira tentar novamente, diga 'Marcar Consulta'.";
             state = "FINISHED";
           }
         } else {
+          console.log("Estado desconhecido ou FINISHED. Encerrando fluxo.");
           responseText =
             "Não entendi sua solicitação. Por favor, diga 'Marcar Consulta' para recomeçar.";
           state = "FINISHED";
@@ -303,8 +325,26 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
         break;
       }
 
+      case "Default Fallback Intent": {
+        console.log("Caiu no fallback intent. Verificando tentativas.");
+        const systemContext = outputContexts.find((ctx: any) =>
+          ctx.name.endsWith("__system_counters__")
+        );
+        const noMatch = systemContext?.parameters?.["no-match"] || 0;
+
+        if (noMatch >= 2) {
+          responseText =
+            "Não entendi suas respostas. Vamos recomeçar. Por favor, diga 'Marcar Consulta' para iniciar novamente.";
+          state = "INITIAL";
+        } else {
+          responseText = "Desculpe, não entendi sua solicitação.";
+        }
+        break;
+      }
+
       default:
         responseText = await getOpenAiCompletion(finalUserInput);
+        console.log("Resposta do GPT:", responseText);
     }
 
     const responseJson: any = {
@@ -314,7 +354,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
     if (state !== "FINISHED") {
       responseJson.outputContexts = [
         {
-          name: `projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}/contexts/marcar_consulta_flow`,
+          name: `${sessionPath}/contexts/marcar_consulta_flow`,
           lifespanCount: 5,
           parameters: {
             state,
@@ -330,6 +370,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       responseJson.outputContexts = [];
     }
 
+    console.log("Resposta enviada ao Dialogflow:", responseJson);
     res.json(responseJson);
   } catch (error) {
     console.error("Erro no Fulfillment:", error);
