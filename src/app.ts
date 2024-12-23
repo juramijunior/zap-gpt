@@ -214,18 +214,21 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   const userQuery = req.body.queryResult.queryText;
   console.log("Texto do usuário:", userQuery);
 
+  // Pegamos todos os contexts ativos
   const outputContexts = req.body.queryResult.outputContexts || [];
-  const flowContext = outputContexts.find((ctx: any) =>
+
+  // Contexto específico de "Marcar Consulta"
+  const marcarConsultaContext = outputContexts.find((ctx: any) =>
     ctx.name.endsWith("marcar_consulta_flow")
   );
-
-  let state = flowContext?.parameters?.state || "INITIAL";
-  let chosenSlot = flowContext?.parameters?.chosenSlot || "";
-  let clientName = flowContext?.parameters?.clientName || "";
-  let clientEmail = flowContext?.parameters?.clientEmail || "";
-  let clientPhone = flowContext?.parameters?.clientPhone || "";
-  let availableSlots = flowContext?.parameters?.availableSlots || [];
-  let currentIndex = flowContext?.parameters?.currentIndex || 0;
+  // Lemos os parâmetros (ou definimos default)
+  let state = marcarConsultaContext?.parameters?.state || "INITIAL";
+  let chosenSlot = marcarConsultaContext?.parameters?.chosenSlot || "";
+  let clientName = marcarConsultaContext?.parameters?.clientName || "";
+  let clientEmail = marcarConsultaContext?.parameters?.clientEmail || "";
+  let clientPhone = marcarConsultaContext?.parameters?.clientPhone || "";
+  let availableSlots = marcarConsultaContext?.parameters?.availableSlots || [];
+  let currentIndex = marcarConsultaContext?.parameters?.currentIndex || 0;
 
   console.log("Estado atual:", state);
 
@@ -367,36 +370,71 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       case "Consultar Consultas Marcadas": {
         console.log("Intenção 'Consultar Consultas Marcadas' acionada.");
 
-        if (state === "INITIAL") {
-          responseText =
-            "Por favor, informe o seu e-mail para que possamos buscar suas consultas marcadas.";
-          state = "AWAITING_CLIENT_EMAIL";
-        } else if (state === "AWAITING_CLIENT_EMAIL") {
-          const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
-          const emailMatch = userQuery.match(emailPattern);
+        // Vamos manter um estado separado para este fluxo.
+        // Se o usuário ainda não forneceu e-mail, pedimos.
+        // Observando o seu código, você já faz isto dentro do mesmo "state"
+        // (mas agora queremos separar do fluxo "marcar_consulta_flow").
 
-          if (!emailMatch || !emailMatch[1]) {
+        // Para isso, podemos usar a mesma estrutura, mas sem mexer nas variáveis do outro fluxo.
+        let consultarState =
+          req.body.queryResult.outputContexts?.find((ctx: any) =>
+            ctx.name.endsWith("consultar_consulta_marcada_flow")
+          )?.parameters?.state || "INITIAL";
+
+        if (intentName === "Consultar Consultas Marcadas") {
+          if (consultarState === "INITIAL") {
             responseText =
-              "E-mail inválido. Por favor, informe um e-mail no formato correto.";
-          } else {
-            const clientEmail = emailMatch[1].trim();
-            const consultasMarcadas = await getBookedAppointments(
-              "jurami.junior@gmail.com",
-              clientEmail
-            );
+              "Por favor, informe o seu e-mail para que possamos buscar suas consultas marcadas.";
+            consultarState = "AWAITING_CLIENT_EMAIL";
+          } else if (consultarState === "AWAITING_CLIENT_EMAIL") {
+            const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
+            const emailMatch = userQuery.match(emailPattern);
 
-            if (consultasMarcadas.length === 0) {
-              responseText = `Não encontramos consultas marcadas para o e-mail ${clientEmail}.`;
-              state = "FINISHED";
+            if (!emailMatch || !emailMatch[1]) {
+              responseText =
+                "E-mail inválido. Por favor, informe um e-mail no formato correto.";
             } else {
-              responseText = `Consultas marcadas para o e-mail ${clientEmail}:\n${consultasMarcadas
-                .map(
-                  (consulta, index) => `${index + 1} - ${consulta.description}`
-                )
-                .join("\n")}`;
-              state = "FINISHED";
+              const clientEmail = emailMatch[1].trim();
+              const consultasMarcadas = await getBookedAppointments(
+                "jurami.junior@gmail.com",
+                clientEmail
+              );
+
+              if (consultasMarcadas.length === 0) {
+                responseText = `Não encontramos consultas marcadas para o e-mail ${clientEmail}.`;
+                consultarState = "FINISHED";
+              } else {
+                responseText = `Consultas marcadas para o e-mail ${clientEmail}:\n${consultasMarcadas
+                  .map(
+                    (consulta, index) =>
+                      `${index + 1} - ${consulta.description}`
+                  )
+                  .join("\n")}`;
+                consultarState = "FINISHED";
+              }
             }
           }
+
+          // No final, vamos sobrescrever o estado no outputContext
+          // para "consultar_consulta_marcada_flow"
+          const responseJsonConsulta: any = {
+            fulfillmentText: responseText,
+            outputContexts: [
+              {
+                name: `${sessionPath}/contexts/consultar_consulta_marcada_flow`,
+                lifespanCount: consultarState === "FINISHED" ? 0 : 5,
+                parameters: {
+                  state: consultarState,
+                },
+              },
+            ],
+          };
+          console.log(
+            "Resposta enviada ao Dialogflow (Consultar Consultas Marcadas):",
+            responseJsonConsulta
+          );
+          res.json(responseJsonConsulta);
+          return; // para não cair na parte default do final
         }
         break;
       }
@@ -440,8 +478,8 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           console.log("Mensagem enviada ao GPT:", finalUserInput);
 
           // Envia a mensagem ao GPT
-          const responseText = await getOpenAiCompletion(finalUserInput);
-          console.log("Resposta do GPT:", responseText);
+          const gptResponse = await getOpenAiCompletion(finalUserInput);
+          console.log("Resposta do GPT:", gptResponse);
 
           // Reinicia o estado e o contexto
           state = "INITIAL";
@@ -454,7 +492,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
           // Configura a resposta do Dialogflow
           const responseJson = {
-            fulfillmentText: responseText,
+            fulfillmentText: gptResponse,
             outputContexts: [], // Remove os contextos ativos
           };
 
@@ -468,16 +506,18 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           }
 
           console.log("Estado e contexto reiniciados.");
-          res.json(responseJson); // Envia a resposta
-          return; // Finaliza a execução
+          res.json(responseJson);
+          return;
         } catch (error) {
           console.error("Erro ao processar resposta do GPT:", error);
           res.status(500).send("Erro ao processar a mensagem.");
-          return; // Finaliza a execução em caso de erro
+          return;
         }
       }
     }
 
+    // Se chegamos até aqui, significa que foi alguma das Intents mapeadas acima (menos a de "Consultar Consultas Marcadas",
+    // que já deu return). Então montamos o output context para "Marcar Consulta", se for o caso:
     const responseJson: any = {
       fulfillmentText: responseText,
       outputContexts: [
