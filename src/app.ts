@@ -80,6 +80,7 @@ async function getAvailableSlots(
       let startHour = 0;
       let endHour = 0;
 
+      // Exemplo: Consulta apenas terças (14h-19h) e quartas (8h-13h)
       if (dayOfWeek === 2) {
         startHour = 14;
         endHour = 19;
@@ -370,12 +371,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       case "Consultar Consultas Marcadas": {
         console.log("Intenção 'Consultar Consultas Marcadas' acionada.");
 
-        // Vamos manter um estado separado para este fluxo.
-        // Se o usuário ainda não forneceu e-mail, pedimos.
-        // Observando o seu código, você já faz isto dentro do mesmo "state"
-        // (mas agora queremos separar do fluxo "marcar_consulta_flow").
-
-        // Para isso, podemos usar a mesma estrutura, mas sem mexer nas variáveis do outro fluxo.
+        // Vamos usar um "estado" separado para este fluxo
         let consultarState =
           req.body.queryResult.outputContexts?.find((ctx: any) =>
             ctx.name.endsWith("consultar_consulta_marcada_flow")
@@ -415,8 +411,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             }
           }
 
-          // No final, vamos sobrescrever o estado no outputContext
-          // para "consultar_consulta_marcada_flow"
+          // Monta a resposta do fluxo de "Consultar Consultas Marcadas"
           const responseJsonConsulta: any = {
             fulfillmentText: responseText,
             outputContexts: [
@@ -434,7 +429,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             responseJsonConsulta
           );
           res.json(responseJsonConsulta);
-          return; // para não cair na parte default do final
+          return; // para não cair na parte default
         }
         break;
       }
@@ -516,8 +511,8 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Se chegamos até aqui, significa que foi alguma das Intents mapeadas acima (menos a de "Consultar Consultas Marcadas",
-    // que já deu return). Então montamos o output context para "Marcar Consulta", se for o caso:
+    // Se chegou aqui, não era a Intent "Consultar Consultas Marcadas" (que já tem o return acima),
+    // então montamos a resposta de "Marcar Consulta" ou de outra Intent:
     const responseJson: any = {
       fulfillmentText: responseText,
       outputContexts: [
