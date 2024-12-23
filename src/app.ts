@@ -326,6 +326,45 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
         break;
 
+      case "Default Fallback Intent":
+        {
+          console.log("Caiu no fallback intent. Verificando tentativas.");
+
+          const outputContexts: DialogflowContext[] =
+            req.body.queryResult.outputContexts || [];
+
+          const systemContext = outputContexts.find((ctx) =>
+            ctx.name.endsWith("__system_counters__")
+          );
+          const noMatch = systemContext?.parameters?.["no-match"] || 0;
+
+          // Inicialize responseJson
+          let responseJson: { fulfillmentText: string; outputContexts: any[] } =
+            {
+              fulfillmentText: "",
+              outputContexts: [],
+            };
+
+          if (noMatch >= 2) {
+            console.log("Muitas tentativas de fallback. Resetando contexto.");
+            responseJson.fulfillmentText =
+              "Não entendi suas respostas. Vamos recomeçar. Por favor, diga 'Marcar Consulta' para iniciar novamente.";
+            responseJson.outputContexts = []; // Remove o contexto
+          } else {
+            console.log(
+              "Intenção não mapeada, enviando mensagem para o ChatGPT..."
+            );
+            const responseText = await getOpenAiCompletion(finalUserInput);
+            console.log("Resposta do GPT:", responseText);
+
+            responseJson.fulfillmentText = responseText;
+            responseJson.outputContexts = outputContexts; // Mantém o contexto se necessário
+          }
+
+          res.json(responseJson);
+        }
+        break;
+
       default:
         console.log(
           "Intenção não mapeada, enviando mensagem para o ChatGPT..."
@@ -504,3 +543,9 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
+
+interface DialogflowContext {
+  name: string;
+  lifespanCount: number;
+  parameters: { [key: string]: any };
+}
