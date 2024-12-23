@@ -204,8 +204,13 @@ app.post("/fulfillment", async (req, res) => {
   const sessionId = sessionPath.split("/").pop() || "";
   const userQuery = req.body.queryResult.queryText;
 
-  const outputContexts = req.body.queryResult.outputContexts || [];
-  const flowContext = outputContexts.find((ctx) =>
+  const outputContexts: {
+    name: string;
+    lifespanCount?: number;
+    parameters?: any;
+  }[] = req.body.queryResult.outputContexts || [];
+
+  const flowContext = outputContexts.find((ctx: { name: string }) =>
     ctx.name.endsWith("marcar_consulta_flow")
   );
 
@@ -223,17 +228,17 @@ app.post("/fulfillment", async (req, res) => {
       case "Marcar Consulta": {
         const calendarId = "jurami.junior@gmail.com";
         if (state === "INITIAL") {
-          const fetchedSlots = await getAvailableSlots(calendarId);
+          const fetchedSlots: string[] = await getAvailableSlots(calendarId); // Tipo explicitamente definido
           if (fetchedSlots.length === 0) {
             responseText = "Não há horários disponíveis no momento.";
             state = "FINISHED";
           } else {
-            availableSlots = fetchedSlots.slice(0, 4);
-            responseText = `Os horários disponíveis são:\n${availableSlots
-              .map((s, i) => `${i + 1} - ${s}`)
-              .join(
-                "\n"
-              )}\n\nResponda com o número do horário desejado ou 0 para mais opções.`;
+            availableSlots = fetchedSlots.map(
+              (s: string, i: number) => `${i + 1} - ${s}`
+            );
+            responseText = `Os horários disponíveis são:\n${availableSlots.join(
+              "\n"
+            )}\n\nResponda com o número do horário desejado ou 0 para mais opções.`;
             state = "AWAITING_SLOT_SELECTION";
           }
         } else if (state === "AWAITING_SLOT_SELECTION") {
@@ -306,35 +311,45 @@ app.post("/fulfillment", async (req, res) => {
       }
 
       case "Consultar Consultas Marcadas": {
+        console.log("Intenção 'Consultar Consultas Marcadas' acionada.");
         const consultasMarcadas = await getBookedAppointments(
           "jurami.junior@gmail.com"
         );
+
         if (consultasMarcadas.length === 0) {
-          responseText = "Você não possui consultas marcadas.";
+          responseText = "Você não possui consultas marcadas no momento.";
           state = "FINISHED";
         } else {
-          responseText = `Consultas:\n${consultasMarcadas
-            .map((c, i) => `${i + 1} - ${c.description}`)
+          responseText = `Suas consultas marcadas:\n${consultasMarcadas
+            .map((consulta, index) => `${index + 1} - ${consulta.description}`)
             .join("\n")}`;
         }
         break;
       }
 
       case "Desmarcar Consultas": {
-        const consultasMarcadas = await getBookedAppointments(
-          "jurami.junior@gmail.com"
-        );
+        console.log("Intenção 'Desmarcar Consulta' acionada.");
+        const consultasMarcadas: { id: string; description: string }[] =
+          await getBookedAppointments("jurami.junior@gmail.com");
+
         if (consultasMarcadas.length === 0) {
-          responseText = "Você não possui consultas para desmarcar.";
+          responseText = "Você não possui consultas marcadas no momento.";
           state = "FINISHED";
         } else {
-          const availableSlots = consultasMarcadas.map((c, i) => ({
-            id: c.id,
-            description: c.description,
-          }));
-          responseText = `Escolha para desmarcar:\n${availableSlots
-            .map((slot, i) => `${i + 1} - ${slot.description}`)
-            .join("\n")}\n\nResponda com o número.`;
+          const availableSlots: { id: string; description: string }[] =
+            consultasMarcadas.map(
+              (consulta: { id: string; description: string }) => ({
+                id: consulta.id,
+                description: consulta.description,
+              })
+            );
+
+          responseText = `Selecione a consulta que deseja desmarcar:\n${availableSlots
+            .map(
+              (slot: { id: string; description: string }, index: number) =>
+                `${index + 1} - ${slot.description}`
+            )
+            .join("\n")}\n\nResponda com o número correspondente.`;
           state = "AWAITING_CANCEL_SELECTION";
         }
         break;
