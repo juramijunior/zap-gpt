@@ -350,13 +350,12 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           "Intenção não mapeada, enviando mensagem para o ChatGPT..."
         );
 
-        // Inicializa o texto do usuário para o GPT
-        const finalUserInput = userQuery.trim();
-        console.log("Mensagem enviada ao GPT:", finalUserInput);
-
         try {
-          // Obtém a resposta do ChatGPT
-          responseText = await getOpenAiCompletion(finalUserInput);
+          const finalUserInput = userQuery.trim();
+          console.log("Mensagem enviada ao GPT:", finalUserInput);
+
+          // Envia a mensagem ao GPT
+          const responseText = await getOpenAiCompletion(finalUserInput);
           console.log("Resposta do GPT:", responseText);
 
           // Reinicia o estado e o contexto
@@ -368,30 +367,29 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           availableSlots = [];
           currentIndex = 0;
 
-          // Remove os contextos do Dialogflow
+          // Configura a resposta do Dialogflow
           const responseJson = {
             fulfillmentText: responseText,
-            outputContexts: [], // Zera os contextos
+            outputContexts: [], // Remove os contextos ativos
           };
 
-          // Verifica se o número do usuário está mapeado
+          // Reinicia o estado no mapa da conversa, se aplicável
           if (req.body.originalDetectIntentRequest?.payload?.data?.From) {
             const fromNumber =
               req.body.originalDetectIntentRequest.payload.data.From;
             if (conversationStateMap[fromNumber]) {
               conversationStateMap[fromNumber].state = "INITIAL";
             }
-          } else {
-            console.warn("Número de usuário não encontrado no contexto.");
           }
 
           console.log("Estado e contexto reiniciados.");
-          res.json(responseJson);
+          res.json(responseJson); // Envia a resposta
+          return; // Finaliza a execução
         } catch (error) {
           console.error("Erro ao processar resposta do GPT:", error);
           res.status(500).send("Erro ao processar a mensagem.");
+          return; // Finaliza a execução em caso de erro
         }
-        break;
       }
     }
 
