@@ -184,7 +184,6 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   const sessionId = sessionPath.split("/").pop() || "";
   const userQuery = req.body.queryResult.queryText;
   console.log("Texto do usuário:", userQuery);
-  const audioUrl = req.body.originalDetectIntentRequest?.payload?.audioUrl;
 
   const outputContexts = req.body.queryResult.outputContexts || [];
   const flowContext = outputContexts.find((ctx: any) =>
@@ -197,28 +196,16 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   let clientEmail = flowContext?.parameters?.clientEmail || "";
   let clientPhone = flowContext?.parameters?.clientPhone || "";
   let availableSlots = flowContext?.parameters?.availableSlots || [];
+  let currentIndex = flowContext?.parameters?.currentIndex || 0;
 
   console.log("Estado atual:", state);
 
   let responseText = "Desculpe, não entendi sua solicitação.";
-  let finalUserInput = userQuery;
-
-  if (audioUrl) {
-    try {
-      console.log("Áudio recebido. Iniciando transcrição...");
-      finalUserInput = await transcribeAudio(audioUrl);
-      console.log("Transcrição concluída:", finalUserInput);
-    } catch (audioError) {
-      console.error("Erro ao transcrever o áudio:", audioError);
-      responseText = "Não consegui entender o áudio enviado. Tente novamente.";
-    }
-  }
 
   try {
     switch (intentName) {
       case "Marcar Consulta": {
         const calendarId = "jurami.junior@gmail.com";
-        let currentSlotIndex = flowContext?.parameters?.currentSlotIndex || 0; // Índice para controlar os slots já exibidos
 
         if (state === "INITIAL") {
           console.log("Estado INITIAL. Buscando horários disponíveis...");
@@ -230,7 +217,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             state = "FINISHED";
           } else {
             availableSlots = fetchedSlots.slice(0, 4);
-            currentSlotIndex = 4; // Atualiza para o próximo grupo de horários
+            currentIndex = 4;
             responseText = `Os horários disponíveis são:\n${availableSlots
               .map((s: string, i: number) => `${i + 1} - ${s}`)
               .join(
@@ -243,30 +230,29 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
           if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
             if (userNumber === 0) {
-              console.log("Usuário solicitou mais horários.");
-
+              console.log("Usuário pediu mais horários.");
               const fetchedSlots = await getAvailableSlots(calendarId);
+              const nextSlots = fetchedSlots.slice(
+                currentIndex,
+                currentIndex + 4
+              );
 
-              if (currentSlotIndex >= fetchedSlots.length) {
-                responseText =
-                  "Não há mais horários disponíveis. Por favor, escolha um dos horários exibidos anteriormente.";
+              if (nextSlots.length === 0) {
+                responseText = "Não há mais horários disponíveis.";
               } else {
-                availableSlots = fetchedSlots.slice(
-                  currentSlotIndex,
-                  currentSlotIndex + 4
-                );
-                currentSlotIndex += 4; // Atualiza para o próximo grupo de horários
+                availableSlots = nextSlots;
+                currentIndex += 4;
                 responseText = `Os próximos horários disponíveis são:\n${availableSlots
                   .map((s: string, i: number) => `${i + 1} - ${s}`)
                   .join(
                     "\n"
-                  )}\n\nPor favor, responda com o número do horário desejado. Caso queira consultar mais horários, responda com 0.`;
+                  )}\n\nPor favor, responda com o número do horário desejado ou 0 para consultar mais horários.`;
               }
             } else {
               const slotIndex = userNumber - 1;
-
               if (slotIndex >= 0 && slotIndex < availableSlots.length) {
                 chosenSlot = availableSlots[slotIndex];
+                console.log("Horário escolhido:", chosenSlot);
                 responseText =
                   "Ótimo! Agora, por favor, informe o seu nome completo.";
                 state = "AWAITING_NAME";
@@ -276,21 +262,15 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
               }
             }
           } else {
-            responseText =
-              "Por favor, responda com um número de 1 a 4 ou 0 para consultar mais horários.";
+            responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
           }
-        } else if (state === "AWAITING_MANUAL_DATE_TIME") {
-          chosenSlot = userQuery;
-          responseText =
-            "Certo, agora, por favor, informe o seu nome completo.";
-          state = "AWAITING_NAME";
         } else if (state === "AWAITING_NAME") {
           const isName = /^[a-zA-ZÀ-ÿ\s']+$/.test(userQuery.trim());
           if (!isName) {
             responseText =
               "Por favor, informe um nome válido. Exemplo: 'Meu nome é João Silva'.";
           } else {
-            clientName = userQuery.trim();
+            clientName = userQuery.replace(/meu nome é/i, "").trim();
             responseText = `Obrigada, ${clientName}. Agora, informe o seu e-mail.`;
             state = "AWAITING_EMAIL";
           }
@@ -313,7 +293,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
           if (!phoneMatch || !phoneMatch[1]) {
             responseText =
-              "Por favor, informe um número de telefone válido. Exemplo: 'Meu telefone é 61999458613'.";
+              "Por favor, informe um número de telefone válido no formato correto. Exemplo: 'Meu telefone é 61999458613'.";
           } else {
             clientPhone = phoneMatch[1].trim();
             responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
@@ -321,6 +301,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           }
         } else if (state === "AWAITING_CONFIRMATION") {
           if (userQuery.toLowerCase() === "sim") {
+            console.log("Usuário confirmou. Criando evento...");
             await createEvent(
               calendarId,
               chosenSlot,
@@ -338,45 +319,30 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             responseText =
               "Por favor, responda apenas com 'Sim' para confirmar ou 'Não' para cancelar.";
           }
-        } else {
-          responseText =
-            "Não entendi sua solicitação. Por favor, diga 'Marcar Consulta' para recomeçar.";
-          state = "FINISHED";
         }
         break;
       }
 
       case "Default Fallback Intent": {
-        console.log("Caiu no fallback intent. Verificando tentativas.");
-        const systemContext = outputContexts.find((ctx: any) =>
-          ctx.name.endsWith("__system_counters__")
-        );
-        const noMatch = systemContext?.parameters?.["no-match"] || 0;
-
-        if (noMatch >= 2) {
-          responseText =
-            "Não entendi suas respostas. Vamos recomeçar. Por favor, diga 'Marcar Consulta' para iniciar novamente.";
-          state = "INITIAL";
-        } else {
-          responseText = "Desculpe, não entendi sua solicitação.";
-        }
+        console.log("Caiu no fallback intent. Resetando contexto.");
+        responseText =
+          "Não entendi suas respostas. Vamos recomeçar. Por favor, diga 'Marcar Consulta' para iniciar novamente.";
+        state = "INITIAL";
         break;
       }
 
-      default:
-        responseText = await getOpenAiCompletion(finalUserInput);
-        console.log("Resposta do GPT:", responseText);
+      default: {
+        responseText = "Desculpe, não entendi sua solicitação.";
+        break;
+      }
     }
 
     const responseJson: any = {
       fulfillmentText: responseText,
-    };
-
-    if (state !== "FINISHED") {
-      responseJson.outputContexts = [
+      outputContexts: [
         {
           name: `${sessionPath}/contexts/marcar_consulta_flow`,
-          lifespanCount: 5,
+          lifespanCount: state === "FINISHED" ? 0 : 5,
           parameters: {
             state,
             chosenSlot,
@@ -384,12 +350,11 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             clientEmail,
             clientPhone,
             availableSlots,
+            currentIndex,
           },
         },
-      ];
-    } else {
-      responseJson.outputContexts = [];
-    }
+      ],
+    };
 
     console.log("Resposta enviada ao Dialogflow:", responseJson);
     res.json(responseJson);
