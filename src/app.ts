@@ -15,7 +15,6 @@ const toZonedTime = dateFnsTz.toZonedTime;
 const format = dateFnsTz.format;
 const userSessionMap: { [key: string]: string } = {};
 
-// Carrega as credenciais do Google (Calendar, Dialogflow, etc.)
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 if (!credentialsJson) {
   throw new Error("As credenciais do Google não estão definidas.");
@@ -37,19 +36,17 @@ const auth = new GoogleAuth({
 
 const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
 
-// Criação do servidor Express
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Google Calendar
 const calendar = google.calendar({ version: "v3", auth });
 
-// Armazena o estado da conversa dos usuários
+// Armazena estados da conversa (ex.: AWAITING_EMAIL, AWAITING_NAME...)
 const conversationStateMap: { [key: string]: any } = {};
 
 /**
- * Divide mensagens grandes em partes menores (Twilio tem limite de caracteres)
+ * Divide uma string em partes menores para enviar via Twilio (limite de caracteres)
  */
 function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   const partes: string[] = [];
@@ -60,13 +57,13 @@ function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
 }
 
 /**
- * Busca horários disponíveis no calendário.
+ * Busca horários disponíveis no Google Calendar
  */
 async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
 ): Promise<string[]> {
-  const timeIncrement = 60;
+  const timeIncrement = 60; // em minutos
   const timeZone = "America/Sao_Paulo";
   let startDate = new Date();
   let endDate = new Date();
@@ -90,35 +87,28 @@ async function getAvailableSlots(
       let startHour = 0;
       let endHour = 0;
 
-      // Ajuste aqui os dias/horários que você atende
+      // Exemplo: Terça das 14h às 19h, Quarta das 8h às 13h
       if (dayOfWeek === 2) {
-        // Terça das 14h às 19h
         startHour = 14;
         endHour = 19;
       } else if (dayOfWeek === 3) {
-        // Quarta das 8h às 13h
         startHour = 8;
         endHour = 13;
       } else {
-        // Se não for ter/qua, pula para o dia seguinte
         currentDate.setDate(currentDate.getDate() + 1);
         currentDate = toZonedTime(currentDate, timeZone);
         continue;
       }
 
-      // Marca o horário inicial do dia
       currentDate.setHours(startHour, 0, 0, 0);
 
-      // Percorre de hora em hora
       while (currentDate.getHours() < endHour) {
         const now = toZonedTime(new Date(), timeZone);
         if (currentDate <= now) {
-          // Se já passou do horário atual, pula
           currentDate.setMinutes(currentDate.getMinutes() + timeIncrement);
           continue;
         }
 
-        // Verifica se o horário está livre
         const isFree = !events.some((event) => {
           const eventStart = event.start?.dateTime
             ? toZonedTime(new Date(event.start.dateTime), timeZone)
@@ -142,7 +132,6 @@ async function getAvailableSlots(
         currentDate.setMinutes(currentDate.getMinutes() + timeIncrement);
       }
 
-      // Dia seguinte
       currentDate.setDate(currentDate.getDate() + 1);
       currentDate = toZonedTime(currentDate, timeZone);
     }
@@ -154,7 +143,7 @@ async function getAvailableSlots(
 }
 
 /**
- * Busca consultas marcadas no calendário para um determinado e-mail
+ * Retorna as consultas marcadas para um determinado e-mail
  */
 async function getBookedAppointments(
   calendarId: string,
@@ -169,7 +158,6 @@ async function getBookedAppointments(
 
   const events = response.data.items || [];
 
-  // Filtra eventos que contenham o e-mail na descrição
   return events
     .filter((event) => event.description?.includes(clientEmail))
     .map((event) => ({
@@ -179,7 +167,7 @@ async function getBookedAppointments(
 }
 
 /**
- * Deleta um agendamento
+ * Deleta um agendamento do calendário
  */
 async function deleteAppointment(
   calendarId: string,
@@ -234,7 +222,7 @@ async function createEvent(
 }
 
 /**
- * Fulfillment (Dialogflow -> Webhook)
+ * Endpoint do Fulfillment (Dialogflow -> webhook)
  */
 app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   console.log("=== Fulfillment recebido do Dialogflow ===");
@@ -245,15 +233,14 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   const userQuery = req.body.queryResult.queryText;
   console.log("Texto do usuário:", userQuery);
 
-  // Pega todos os contexts ativos
+  // Todos os contexts ativos
   const outputContexts = req.body.queryResult.outputContexts || [];
 
-  // Contexto de marcar consulta
+  // Contexto de Marcar Consulta
   const marcarConsultaContext = outputContexts.find((ctx: any) =>
     ctx.name.endsWith("marcar_consulta_flow")
   );
-
-  // Variáveis do fluxo "Marcar Consulta"
+  // Lemos variáveis do fluxo "Marcar Consulta"
   let state = marcarConsultaContext?.parameters?.state || "INITIAL";
   let chosenSlot = marcarConsultaContext?.parameters?.chosenSlot || "";
   let clientName = marcarConsultaContext?.parameters?.clientName || "";
@@ -264,19 +251,20 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
   console.log("Estado atual:", state);
 
-  // Resposta padrão se nada bater
   let responseText = "Desculpe, não entendi sua solicitação.";
 
   try {
     switch (intentName) {
-      /**
-       * Fluxo de MARCAR CONSULTA
-       */
-      case "Marcar Consulta": {
+      // =================================
+      // FLUXO MARCAR CONSULTA (INTENT PRINCIPAL)
+      // =================================
+      case "Marcar Consulta (Início)": {
+        // Ex.: Quando o usuário diz “Quero marcar uma consulta”
+        // Vamos buscar horários e iniciar o fluxo.
         const calendarId = "jurami.junior@gmail.com";
 
+        console.log("Usuário iniciou o fluxo de Marcar Consulta (Início).");
         if (state === "INITIAL") {
-          console.log("Estado INITIAL. Buscando horários disponíveis...");
           const fetchedSlots = await getAvailableSlots(calendarId);
 
           if (fetchedSlots.length === 0) {
@@ -293,12 +281,22 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
               )}\n\nPor favor, responda com o número do horário desejado. Caso queira consultar mais horários, responda com 0.`;
             state = "AWAITING_SLOT_SELECTION";
           }
-        } else if (state === "AWAITING_SLOT_SELECTION") {
+        }
+        break;
+      }
+
+      // Sub-intent da mesma “Marcar Consulta” (fluxo) para continuar a seleção
+      case "Marcar Consulta": {
+        // Se esse case for disparado sem "Início", significa que já está no fluxo,
+        // pois definimos "Marcar Consulta" com input context = marcar_consulta_flow,
+        // ou algo assim (depende de como você configurou no Dialogflow).
+        if (state === "AWAITING_SLOT_SELECTION") {
           const userNumber = parseInt(userQuery, 10);
 
           if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
             if (userNumber === 0) {
               console.log("Usuário pediu mais horários.");
+              const calendarId = "jurami.junior@gmail.com";
               const fetchedSlots = await getAvailableSlots(calendarId);
               const nextSlots = fetchedSlots.slice(
                 currentIndex,
@@ -330,9 +328,11 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
               }
             }
           } else {
-            responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
+            responseText =
+              "Por favor, responda com um número de 1 a 4 ou 0 para mais horários.";
           }
         } else if (state === "AWAITING_NAME") {
+          // Se disparou aqui, é porque (no Dialogflow) "Marcar Consulta" também está pegando o nome
           const isName = /^[a-zA-ZÀ-ÿ\s']+$/.test(userQuery.trim());
           if (!isName) {
             responseText =
@@ -343,34 +343,24 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             responseText = `Obrigada, ${clientName}. Agora, informe o seu e-mail.`;
             state = "AWAITING_EMAIL";
           }
-        } else if (state === "AWAITING_EMAIL") {
-          const emailPattern =
-            /meu e-mail é\s*([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
-          const emailMatch = userQuery.match(emailPattern);
-
-          if (!emailMatch || !emailMatch[1]) {
-            responseText =
-              "Por favor, informe um e-mail válido no formato correto. Exemplo: 'Meu e-mail é exemplo@dominio.com'.";
-          } else {
-            clientEmail = emailMatch[1].trim();
-            responseText = "Agora, informe seu número de telefone, por favor.";
-            state = "AWAITING_PHONE";
-          }
         } else if (state === "AWAITING_PHONE") {
+          // Se disparou aqui, é porque (no Dialogflow) "Marcar Consulta" também está pegando o telefone
           const phonePattern = /meu telefone é\s*(\d{10,15})/i;
           const phoneMatch = userQuery.match(phonePattern);
 
           if (!phoneMatch || !phoneMatch[1]) {
             responseText =
-              "Por favor, informe um número de telefone válido no formato correto. Exemplo: 'Meu telefone é 61999458613'.";
+              "Por favor, informe um número de telefone válido. Exemplo: 'Meu telefone é 61999458613'.";
           } else {
             clientPhone = phoneMatch[1].trim();
             responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
             state = "AWAITING_CONFIRMATION";
           }
         } else if (state === "AWAITING_CONFIRMATION") {
+          // Confirma ou não a marcação
           if (userQuery.toLowerCase() === "sim") {
             console.log("Usuário confirmou. Criando evento...");
+            const calendarId = "jurami.junior@gmail.com";
             await createEvent(
               calendarId,
               chosenSlot,
@@ -382,7 +372,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             state = "FINISHED";
           } else if (userQuery.toLowerCase() === "não") {
             responseText =
-              "Consulta cancelada. Caso deseje marcar novamente, diga 'Marcar Consulta'.";
+              "Consulta cancelada. Caso deseje marcar novamente, diga 'Quero marcar uma consulta'.";
             state = "FINISHED";
           } else {
             responseText =
@@ -392,69 +382,71 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
         break;
       }
 
-      /**
-       * Fluxo de CONSULTAR CONSULTAS MARCADAS
-       * Usamos DUAS Intents:
-       * 1. Consultar Consultas Marcadas (Início)  -> sem input context
-       * 2. Consultar Consultas Marcadas (Aguardando E-mail) -> input context = consultar_consulta_marcada_flow
-       */
+      // =================================
+      // NOVA INTENT: "Marcar Consulta (Aguardando E-mail)"
+      // =================================
+      case "Marcar Consulta (Aguardando E-mail)": {
+        // Aqui você coloca a lógica do AWAITING_EMAIL separada
+        // (Input Context = marcar_consulta_flow, Output Context = marcar_consulta_flow)
+        if (state === "AWAITING_EMAIL") {
+          const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
+          const emailMatch = userQuery.match(emailPattern);
+
+          if (!emailMatch || !emailMatch[1]) {
+            responseText =
+              "Por favor, informe um e-mail válido. Exemplo: 'Meu e-mail é exemplo@dominio.com'.";
+          } else {
+            clientEmail = emailMatch[1].trim();
+            responseText = "Agora, informe seu número de telefone, por favor.";
+            state = "AWAITING_PHONE";
+          }
+        }
+        break;
+      }
+
+      // =================================
+      // FLUXO CONSULTAR CONSULTAS MARCADAS
+      // =================================
       case "Consultar Consultas Marcadas (Início)": {
-        // Aqui inicia o fluxo: outputContext => "consultar_consulta_marcada_flow"
-        // E pedimos o e-mail
+        // Inicia o fluxo de consultar, pedindo o e-mail
         responseText =
-          "Claro, por favor, me informe o seu e-mail para que possamos buscar suas consultas.";
-        // Se quiser salvar algo no "state" do fluxo, você pode. Ex:
-        // ...
+          "Certo! Para consultar suas consultas marcadas, por favor informe o seu e-mail.";
         break;
       }
 
       case "Consultar Consultas Marcadas (Aguardando E-mail)": {
-        // Agora a Intent tem inputContext = consultar_consulta_marcada_flow
-        // e este case só dispara se estivermos nesse contexto
         const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
         const emailMatch = userQuery.match(emailPattern);
 
         if (!emailMatch || !emailMatch[1]) {
           responseText =
-            "E-mail inválido. Por favor, informe um e-mail no formato correto.";
+            "E-mail inválido. Por favor, informe um e-mail no formato correto (ex: exemplo@dominio.com).";
         } else {
-          const clientEmail = emailMatch[1].trim();
+          const emailBuscado = emailMatch[1].trim();
           const consultasMarcadas = await getBookedAppointments(
             "jurami.junior@gmail.com",
-            clientEmail
+            emailBuscado
           );
 
           if (consultasMarcadas.length === 0) {
-            responseText = `Não encontramos consultas marcadas para o e-mail ${clientEmail}.`;
+            responseText = `Não encontramos consultas marcadas para o e-mail ${emailBuscado}.`;
           } else {
-            responseText = `Consultas marcadas para o e-mail ${clientEmail}:\n${consultasMarcadas
-              .map(
-                (consulta, index) => `${index + 1} - ${consulta.description}`
-              )
+            responseText = `Consultas marcadas para o e-mail ${emailBuscado}:\n${consultasMarcadas
+              .map((c, i) => `${i + 1} - ${c.description}`)
               .join("\n")}`;
           }
         }
         break;
       }
 
-      // Outras Intents mapeadas...
-      case "saudacoes_e_boas_vindas":
-        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
-        break;
-
-      case "introducao_alimentar":
-        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
-        break;
-
-      case "acompanhamento_gestante":
-        responseText = `Deixa eu te explicar como funciona o pré natal nutricional da Dra Sabrina \n\n A Dra Sabrina vai te ajudar a conduzir a sua gestação de forma saudável, mas sem complicar a sua rotina e sem mudanças radicais na sua alimentação.\n\n O foco do acompanhamento nutricional será no ganho de peso recomendado para o trimestre, no crescimento do bebê e na redução das chances de desenvolver complicações gestacionais. \n\n Além disso, ela prescreve toda a suplementação necessária durante a gestação, de acordo com o trimestre, com as necessidade da mamãe e do bebê, e sempre levando em consideração os resultados dos exames. \n\n Antes da primeira consulta será enviado um questionário, para que a Dra possa entender melhor as suas particularidades e, durante a consulta, consiga priorizar as questões mais importantes. \n\n Na primeira consulta, que dura em torno de 1h, ela vai te ouvir para poder entender a sua rotina e se aprofundar nas suas necessidades. \n\n Será aferido o seu peso, altura, circunferências e dobras cutâneas, para concluir seu Diagnóstico Nutricional e acompanhar a sua evolução de ganho de peso durante a gestação \n\n Pelos próximos 30 dias após a consulta, você conta com a facilidade de acessar todo o material da consulta (plano alimentar, receitas e prescrições, orientações, pedidos de exame, etc) pelo aplicativo da Dra. Sabrina.  \n\n O seu acompanhamento será feito pelo chat do app. Uma vez por semana durante os 30 dias, a Dra acessa o chat responder a todas as suas dúvidas.`;
-        break;
-
+      // =================================
+      // DESMARCAR
+      // =================================
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
         const consultasMarcadas = await getBookedAppointments(
           "jurami.junior@gmail.com",
-          clientEmail // e-mail do cliente
+          clientEmail
         );
         if (consultasMarcadas.length === 0) {
           responseText = "Você não possui consultas marcadas no momento.";
@@ -479,24 +471,36 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
         break;
       }
 
-      /**
-       * Se nenhuma das Intents acima bater, consideramos "não mapeada"
-       * e disparamos ChatGPT
-       */
+      // =================================
+      // OUTRAS INTENTS ESPECÍFICAS
+      // =================================
+      case "saudacoes_e_boas_vindas":
+        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
+        break;
+
+      case "introducao_alimentar":
+        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
+        break;
+
+      case "acompanhamento_gestante":
+        responseText = `Deixa eu te explicar como funciona o pré natal nutricional da Dra Sabrina \n\n A Dra Sabrina vai te ajudar a conduzir a sua gestação de forma saudável, mas sem complicar a sua rotina e sem mudanças radicais na sua alimentação.\n\n O foco do acompanhamento nutricional será no ganho de peso recomendado para o trimestre, no crescimento do bebê e na redução das chances de desenvolver complicações gestacionais. \n\n Além disso, ela prescreve toda a suplementação necessária durante a gestação, de acordo com o trimestre, com as necessidade da mamãe e do bebê, e sempre levando em consideração os resultados dos exames. \n\n Antes da primeira consulta será enviado um questionário, para que a Dra possa entender melhor as suas particularidades e, durante a consulta, consiga priorizar as questões mais importantes. \n\n Na primeira consulta, que dura em torno de 1h, ela vai te ouvir para poder entender a sua rotina e se aprofundar nas suas necessidades. \n\n Será aferido o seu peso, altura, circunferências e dobras cutâneas, para concluir seu Diagnóstico Nutricional e acompanhar a sua evolução de ganho de peso durante a gestação \n\n Pelos próximos 30 dias após a consulta, você conta com a facilidade de acessar todo o material da consulta (plano alimentar, receitas e prescrições, orientações, pedidos de exame, etc) pelo aplicativo da Dra. Sabrina.  \n\n O seu acompanhamento será feito pelo chat do app. Uma vez por semana durante os 30 dias, a Dra acessa o chat responder a todas as suas dúvidas.`;
+        break;
+
+      // =================================
+      // SE NENHUM CASE BATER -> ChatGPT
+      // =================================
       default: {
         console.log(
           "Intenção não mapeada, enviando mensagem para o ChatGPT..."
         );
-
         try {
           const finalUserInput = userQuery.trim();
           console.log("Mensagem enviada ao GPT:", finalUserInput);
 
-          // Envia a mensagem ao GPT
           const gptResponse = await getOpenAiCompletion(finalUserInput);
           console.log("Resposta do GPT:", gptResponse);
 
-          // Reinicia o estado e o contexto
+          // Reinicia
           state = "INITIAL";
           chosenSlot = "";
           clientName = "";
@@ -505,13 +509,11 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           availableSlots = [];
           currentIndex = 0;
 
-          // Configura a resposta do Dialogflow (sem contextos)
           const responseJson = {
             fulfillmentText: gptResponse,
             outputContexts: [],
           };
 
-          // Se estiver usando Twilio, limpa o estado
           if (req.body.originalDetectIntentRequest?.payload?.data?.From) {
             const fromNumber =
               req.body.originalDetectIntentRequest.payload.data.From;
@@ -522,7 +524,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
           console.log("Estado e contexto reiniciados.");
           res.json(responseJson);
-          return; // encerra
+          return;
         } catch (error) {
           console.error("Erro ao processar resposta do GPT:", error);
           res.status(500).send("Erro ao processar a mensagem.");
@@ -531,15 +533,17 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Se chegou até aqui, foi uma das Intents mapeadas (exceto "default" que já deu return).
-    // Montamos a resposta do Dialogflow com o contexto "marcar_consulta_flow" ou outro,
-    // se for para continuar nesse fluxo.
+    // ========================
+    // Se chegou aqui, foi alguma das Intents do switch (menos o default que deu return).
+    // Monta a resposta com o context "marcar_consulta_flow" se for esse o fluxo, etc.
+    // ========================
     const responseJson: any = {
       fulfillmentText: responseText,
       outputContexts: [
         {
           name: `${sessionPath}/contexts/${
-            intentName === "Marcar Consulta"
+            // Se a Intent for alguma sub-intent de marcar, setamos "marcar_consulta_flow"
+            intentName.startsWith("Marcar Consulta")
               ? "marcar_consulta_flow"
               : "consultar_consulta_marcada_flow"
           }`,
@@ -566,7 +570,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 });
 
 /**
- * Rota /webhook para receber mensagens do WhatsApp (Twilio)
+ * Rota para receber mensagens do WhatsApp (via Twilio)
  */
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -597,13 +601,12 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     console.log("Mensagem recebida do usuário:", incomingMessage);
     console.log("Audio URL:", audioUrl);
 
-    // Autenticação com Dialogflow
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
 
     let finalUserMessage = incomingMessage;
 
-    // Se veio áudio, transcreve
+    // Se receber áudio, transcreve
     if (audioUrl) {
       try {
         console.log(`Áudio detectado. Transcrevendo áudio da URL: ${audioUrl}`);
@@ -616,11 +619,11 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Verifica o estado atual no conversationStateMap
+    // Verifica estado atual
     const currentState = conversationStateMap[fromNumber]?.state || "";
     console.log("Estado atual da conversa para o usuário:", currentState);
 
-    // Se estivermos num estado específico, adicionamos prefixos para “Meu nome é”, “Meu e-mail é”, etc.
+    // Dependendo do estado, adiciona prefixos ("Meu e-mail é ...")
     if (
       currentState === "AWAITING_NAME" &&
       !finalUserMessage.toLowerCase().includes("meu nome é")
@@ -643,7 +646,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
     console.log("Mensagem final enviada ao Dialogflow:", finalUserMessage);
 
-    // Envia a mensagem ao Dialogflow detectIntent
+    // Envia ao Dialogflow
     const dialogflowResponse = await axios.post(
       `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
       {
@@ -663,23 +666,21 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       dialogflowResponse.data.queryResult.fulfillmentText ||
       "Desculpe, não entendi.";
 
-    // Lê o contexto (por ex. marcar_consulta_flow) retornado
+    // Tenta pegar o contexto do fluxo de marcar consulta
     const outputContexts =
       dialogflowResponse.data.queryResult.outputContexts || [];
     const flowContext = outputContexts.find((ctx: any) =>
       ctx.name.endsWith("marcar_consulta_flow")
     );
-
-    // Atualiza o estado local
     let updatedState = flowContext?.parameters?.state || "";
     console.log("Novo estado retornado pelo Dialogflow:", updatedState);
 
-    // Salva esse estado no conversationStateMap
+    // Atualiza estado local
     conversationStateMap[fromNumber] = {
       state: updatedState,
     };
 
-    // Divide e envia a resposta ao usuário
+    // Envia a resposta ao usuário (quebrando em partes se for grande)
     const partesMensagem = dividirMensagem(fullResponseMessage);
     for (const parte of partesMensagem) {
       console.log("Enviando parte da mensagem ao usuário:", parte);
@@ -704,7 +705,6 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// Inicia o servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
