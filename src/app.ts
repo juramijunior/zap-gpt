@@ -176,6 +176,7 @@ async function createEvent(
   }
 }
 
+// Função principal de Fulfillment
 app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   console.log("=== Fulfillment recebido do Dialogflow ===");
   const intentName = req.body.queryResult.intent.displayName;
@@ -279,7 +280,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             state = "AWAITING_EMAIL";
           }
         } else if (state === "AWAITING_EMAIL") {
-          console.log("Estado AWAITING_EMAIL. Validando e-mail...");
+          console.log("Estado AWAITING_EMAIL. Armazenando e-mail...");
           const emailPattern =
             /meu e-mail é\s*([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
           const emailMatch = finalUserInput.match(emailPattern);
@@ -287,36 +288,23 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           if (!emailMatch || !emailMatch[1]) {
             responseText =
               "Por favor, informe um e-mail válido no formato correto. Exemplo: 'Meu e-mail é exemplo@dominio.com'";
-            res.json({
-              fulfillmentText: responseText,
-              outputContexts: [
-                {
-                  name: `${sessionPath}/contexts/marcar_consulta_flow`,
-                  lifespanCount: 5,
-                  parameters: {
-                    state,
-                    clientName,
-                    clientEmail: "",
-                    clientPhone,
-                    chosenSlot,
-                    availableSlots,
-                  },
-                },
-              ],
-            });
-            return;
-          }
-
-          clientEmail = emailMatch[1].trim();
-          console.log("E-mail válido extraído:", clientEmail);
-          responseText = "Agora, informe seu número de telefone, por favor.";
-          state = "AWAITING_PHONE";
-        } else if (state === "AWAITING_PHONE") {
-          const isValidPhone = /^\d{10,15}$/.test(finalUserInput);
-          if (!isValidPhone) {
-            responseText = "Por favor, informe um número de telefone válido.";
           } else {
-            clientPhone = finalUserInput;
+            clientEmail = emailMatch[1].trim();
+            console.log("E-mail válido extraído:", clientEmail);
+            responseText = "Agora, informe seu número de telefone, por favor.";
+            state = "AWAITING_PHONE";
+          }
+        } else if (state === "AWAITING_PHONE") {
+          console.log("Estado AWAITING_PHONE. Validando telefone...");
+          const phonePattern = /meu telefone é\s*(\d{10,15})/i;
+          const phoneMatch = finalUserInput.match(phonePattern);
+
+          if (!phoneMatch || !phoneMatch[1]) {
+            responseText =
+              "Por favor, informe um número de telefone válido. Exemplo: 'Meu telefone é 61999458613'.";
+          } else {
+            clientPhone = phoneMatch[1].trim();
+            console.log("Telefone válido extraído:", clientPhone);
             responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
             state = "AWAITING_CONFIRMATION";
           }
@@ -339,7 +327,6 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             state = "FINISHED";
           }
         } else {
-          console.log("Estado desconhecido ou FINISHED. Encerrando fluxo.");
           responseText =
             "Não entendi sua solicitação. Por favor, diga 'Marcar Consulta' para recomeçar.";
           state = "FINISHED";
