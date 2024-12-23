@@ -176,7 +176,7 @@ async function createEvent(
   }
 }
 
-app.post("/fulfillment", async (req: Request, res: Response) => {
+app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   console.log("=== Fulfillment recebido do Dialogflow ===");
   const intentName = req.body.queryResult.intent.displayName;
   console.log("Intenção disparada:", intentName);
@@ -211,6 +211,8 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
     } catch (audioError) {
       console.error("Erro ao transcrever o áudio:", audioError);
       responseText = "Não consegui entender o áudio enviado. Tente novamente.";
+      res.json({ fulfillmentText: responseText });
+      return;
     }
   }
 
@@ -236,7 +238,6 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             state = "AWAITING_SLOT_SELECTION";
           }
         } else if (state === "AWAITING_SLOT_SELECTION") {
-          console.log("Estado AWAITING_SLOT_SELECTION. Verificando número...");
           const userNumber = parseInt(finalUserInput, 10);
           if (!isNaN(userNumber) && userNumber >= 0 && userNumber <= 4) {
             if (userNumber === 0) {
@@ -259,39 +260,27 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
           } else {
             responseText = "Por favor, responda com um número de 1 a 4 ou 0.";
           }
-        } else if (state === "AWAITING_MANUAL_DATE_TIME") {
-          console.log(
-            "Estado AWAITING_MANUAL_DATE_TIME. Armazenando data/hora manual..."
-          );
-          chosenSlot = finalUserInput;
-          console.log("Data/hora manual:", chosenSlot);
-          responseText =
-            "Certo, agora, por favor, informe o seu nome completo.";
-          state = "AWAITING_NAME";
         } else if (state === "AWAITING_NAME") {
-          console.log("Estado AWAITING_NAME. Armazenando nome...");
-          clientName = finalUserInput;
-          console.log("Nome:", clientName);
-          responseText = "Agora, informe seu e-mail, por favor.";
+          const isName = /^[a-zA-ZÀ-ÿ\s']+$/.test(finalUserInput.trim());
+          if (!isName) {
+            responseText =
+              "Por favor, informe um nome válido. Exemplo: 'Meu nome é João Silva'.";
+            res.json({ fulfillmentText: responseText });
+            return;
+          }
+          clientName = finalUserInput.trim();
+          responseText = `Obrigada, ${clientName}. Agora, informe o seu e-mail.`;
           state = "AWAITING_EMAIL";
         } else if (state === "AWAITING_EMAIL") {
-          console.log("Estado AWAITING_EMAIL. Armazenando e-mail...");
-          clientEmail = finalUserInput;
-          console.log("E-mail:", clientEmail);
+          clientEmail = finalUserInput.trim();
           responseText = "Agora, informe seu número de telefone, por favor.";
           state = "AWAITING_PHONE";
         } else if (state === "AWAITING_PHONE") {
-          console.log("Estado AWAITING_PHONE. Armazenando telefone...");
-          clientPhone = finalUserInput;
-          console.log("Telefone:", clientPhone);
+          clientPhone = finalUserInput.trim();
           responseText = `Por favor, confirme os dados:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}\n\nConfirma? (sim/não)`;
           state = "AWAITING_CONFIRMATION";
         } else if (state === "AWAITING_CONFIRMATION") {
-          console.log(
-            "Estado AWAITING_CONFIRMATION. Verificando confirmação..."
-          );
           if (finalUserInput.toLowerCase() === "sim") {
-            console.log("Usuário confirmou. Criando evento...");
             await createEvent(
               calendarId,
               chosenSlot,
@@ -302,13 +291,11 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
             responseText = "Sua consulta foi marcada com sucesso!";
             state = "FINISHED";
           } else {
-            console.log("Usuário não confirmou. Encerrando sem marcar.");
             responseText =
               "Ok, a consulta não foi marcada. Caso queira tentar novamente, diga 'Marcar Consulta'.";
             state = "FINISHED";
           }
         } else {
-          console.log("Estado desconhecido ou FINISHED. Encerrando fluxo.");
           responseText =
             "Não entendi sua solicitação. Por favor, diga 'Marcar Consulta' para recomeçar.";
           state = "FINISHED";
@@ -316,69 +303,14 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
         break;
       }
 
-      case "saudacoes_e_boas_vindas":
-        console.log("Intenção saudacoes_e_boas_vindas acionada.");
-        responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
-        break;
-
-      case "introducao_alimentar":
-        console.log("Intenção introducao_alimentar acionada.");
-        responseText = `Vou te explicar direitinho como funciona o acompanhamento nutricional da Dra Sabrina, ok? 😉\n\nA Dra Sabrina vai te ajudar com a introdução alimentar do seu bebê explicando como preparar os alimentos, quais alimentos devem ou não ser oferecidos nessa fase e de quais formas oferecê-los, dentre outros detalhes.\n\n🔹 *5 a 6 meses*: Orientações para iniciar a alimentação.\n🔹 *7 meses*: Introdução dos alimentos alergênicos e aproveitamento da janela imunológica.\n🔹 *9 meses*: Evolução das texturas dos alimentos.\n🔹 *12 meses*: Check-up e orientações para transição à alimentação da família.\n\nDurante 30 dias após a consulta, você pode tirar dúvidas pelo chat do app. A Dra. responde semanalmente.`;
-        break;
-
-      case "Default Fallback Intent":
-        {
-          console.log("Caiu no fallback intent. Verificando tentativas.");
-
-          const outputContexts: DialogflowContext[] =
-            req.body.queryResult.outputContexts || [];
-
-          const systemContext = outputContexts.find((ctx) =>
-            ctx.name.endsWith("__system_counters__")
-          );
-          const noMatch = systemContext?.parameters?.["no-match"] || 0;
-
-          // Inicialize responseJson
-          let responseJson: { fulfillmentText: string; outputContexts: any[] } =
-            {
-              fulfillmentText: "",
-              outputContexts: [],
-            };
-
-          if (noMatch >= 2) {
-            console.log("Muitas tentativas de fallback. Resetando contexto.");
-            responseJson.fulfillmentText =
-              "Não entendi suas respostas. Vamos recomeçar. Por favor, diga 'Marcar Consulta' para iniciar novamente.";
-            responseJson.outputContexts = []; // Remove o contexto
-          } else {
-            console.log(
-              "Intenção não mapeada, enviando mensagem para o ChatGPT..."
-            );
-            const responseText = await getOpenAiCompletion(finalUserInput);
-            console.log("Resposta do GPT:", responseText);
-
-            responseJson.fulfillmentText = responseText;
-            responseJson.outputContexts = outputContexts; // Mantém o contexto se necessário
-          }
-
-          res.json(responseJson);
-        }
-        break;
-
       default:
-        console.log(
-          "Intenção não mapeada, enviando mensagem para o ChatGPT..."
-        );
-        console.log("Mensagem enviada:", finalUserInput);
         responseText = await getOpenAiCompletion(finalUserInput);
-        console.log("Resposta do GPT:", responseText);
     }
 
     const responseJson: any = {
       fulfillmentText: responseText,
     };
 
-    console.log("Novo estado:", state);
     if (state !== "FINISHED") {
       responseJson.outputContexts = [
         {
@@ -398,15 +330,10 @@ app.post("/fulfillment", async (req: Request, res: Response) => {
       responseJson.outputContexts = [];
     }
 
-    console.log("Resposta enviada ao Dialogflow:", responseJson);
-    if (!res.headersSent) {
-      res.json(responseJson);
-    }
+    res.json(responseJson);
   } catch (error) {
     console.error("Erro no Fulfillment:", error);
-    if (!res.headersSent) {
-      res.status(500).send("Erro ao processar a intenção.");
-    }
+    res.status(500).send("Erro ao processar a intenção.");
   }
 });
 
