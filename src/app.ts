@@ -279,16 +279,38 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             state = "AWAITING_EMAIL";
           }
         } else if (state === "AWAITING_EMAIL") {
-          const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-            finalUserInput
-          );
-          if (!isValidEmail) {
-            responseText = "Por favor, informe um e-mail válido.";
-          } else {
-            clientEmail = finalUserInput;
-            responseText = "Agora, informe seu número de telefone, por favor.";
-            state = "AWAITING_PHONE";
+          console.log("Estado AWAITING_EMAIL. Validando e-mail...");
+          const emailPattern =
+            /meu e-mail é\s*([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
+          const emailMatch = finalUserInput.match(emailPattern);
+
+          if (!emailMatch || !emailMatch[1]) {
+            responseText =
+              "Por favor, informe um e-mail válido no formato correto. Exemplo: 'Meu e-mail é exemplo@dominio.com'";
+            res.json({
+              fulfillmentText: responseText,
+              outputContexts: [
+                {
+                  name: `${sessionPath}/contexts/marcar_consulta_flow`,
+                  lifespanCount: 5,
+                  parameters: {
+                    state,
+                    clientName,
+                    clientEmail: "",
+                    clientPhone,
+                    chosenSlot,
+                    availableSlots,
+                  },
+                },
+              ],
+            });
+            return;
           }
+
+          clientEmail = emailMatch[1].trim();
+          console.log("E-mail válido extraído:", clientEmail);
+          responseText = "Agora, informe seu número de telefone, por favor.";
+          state = "AWAITING_PHONE";
         } else if (state === "AWAITING_PHONE") {
           const isValidPhone = /^\d{10,15}$/.test(finalUserInput);
           if (!isValidPhone) {
