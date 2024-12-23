@@ -15,6 +15,7 @@ const toZonedTime = dateFnsTz.toZonedTime;
 const format = dateFnsTz.format;
 const userSessionMap: { [key: string]: string } = {};
 
+// Carrega as credenciais do Google (Calendar, Dialogflow, etc.)
 const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 if (!credentialsJson) {
   throw new Error("As credenciais do Google não estão definidas.");
@@ -36,14 +37,20 @@ const auth = new GoogleAuth({
 
 const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID;
 
+// Criação do servidor Express
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
+// Google Calendar
 const calendar = google.calendar({ version: "v3", auth });
 
+// Armazena o estado da conversa dos usuários
 const conversationStateMap: { [key: string]: any } = {};
 
+/**
+ * Divide mensagens grandes em partes menores (Twilio tem limite de caracteres)
+ */
 function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   const partes: string[] = [];
   for (let i = 0; i < mensagem.length; i += tamanhoMax) {
@@ -52,6 +59,9 @@ function dividirMensagem(mensagem: string, tamanhoMax = 1600): string[] {
   return partes;
 }
 
+/**
+ * Busca horários disponíveis no calendário.
+ */
 async function getAvailableSlots(
   calendarId: string,
   weeksToSearch = 2
@@ -80,28 +90,35 @@ async function getAvailableSlots(
       let startHour = 0;
       let endHour = 0;
 
-      // Exemplo: Consulta apenas terças (14h-19h) e quartas (8h-13h)
+      // Ajuste aqui os dias/horários que você atende
       if (dayOfWeek === 2) {
+        // Terça das 14h às 19h
         startHour = 14;
         endHour = 19;
       } else if (dayOfWeek === 3) {
+        // Quarta das 8h às 13h
         startHour = 8;
         endHour = 13;
       } else {
+        // Se não for ter/qua, pula para o dia seguinte
         currentDate.setDate(currentDate.getDate() + 1);
         currentDate = toZonedTime(currentDate, timeZone);
         continue;
       }
 
+      // Marca o horário inicial do dia
       currentDate.setHours(startHour, 0, 0, 0);
 
+      // Percorre de hora em hora
       while (currentDate.getHours() < endHour) {
         const now = toZonedTime(new Date(), timeZone);
         if (currentDate <= now) {
+          // Se já passou do horário atual, pula
           currentDate.setMinutes(currentDate.getMinutes() + timeIncrement);
           continue;
         }
 
+        // Verifica se o horário está livre
         const isFree = !events.some((event) => {
           const eventStart = event.start?.dateTime
             ? toZonedTime(new Date(event.start.dateTime), timeZone)
@@ -125,6 +142,7 @@ async function getAvailableSlots(
         currentDate.setMinutes(currentDate.getMinutes() + timeIncrement);
       }
 
+      // Dia seguinte
       currentDate.setDate(currentDate.getDate() + 1);
       currentDate = toZonedTime(currentDate, timeZone);
     }
@@ -135,20 +153,23 @@ async function getAvailableSlots(
   }
 }
 
+/**
+ * Busca consultas marcadas no calendário para um determinado e-mail
+ */
 async function getBookedAppointments(
   calendarId: string,
   clientEmail: string
 ): Promise<{ id: string; description: string }[]> {
   const response = await calendar.events.list({
     calendarId,
-    timeMin: new Date().toISOString(), // Busca eventos a partir do momento atual
+    timeMin: new Date().toISOString(),
     singleEvents: true,
     orderBy: "startTime",
   });
 
   const events = response.data.items || [];
 
-  // Filtrar eventos que contenham o e-mail na descrição ou entre os participantes
+  // Filtra eventos que contenham o e-mail na descrição
   return events
     .filter((event) => event.description?.includes(clientEmail))
     .map((event) => ({
@@ -157,6 +178,9 @@ async function getBookedAppointments(
     }));
 }
 
+/**
+ * Deleta um agendamento
+ */
 async function deleteAppointment(
   calendarId: string,
   eventId: string
@@ -171,6 +195,9 @@ async function deleteAppointment(
   }
 }
 
+/**
+ * Cria um evento no Google Calendar
+ */
 async function createEvent(
   calendarId: string,
   chosenSlot: string,
@@ -206,6 +233,9 @@ async function createEvent(
   }
 }
 
+/**
+ * Fulfillment (Dialogflow -> Webhook)
+ */
 app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   console.log("=== Fulfillment recebido do Dialogflow ===");
   const intentName = req.body.queryResult.intent.displayName;
@@ -215,14 +245,15 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   const userQuery = req.body.queryResult.queryText;
   console.log("Texto do usuário:", userQuery);
 
-  // Pegamos todos os contexts ativos
+  // Pega todos os contexts ativos
   const outputContexts = req.body.queryResult.outputContexts || [];
 
-  // Contexto específico de "Marcar Consulta"
+  // Contexto de marcar consulta
   const marcarConsultaContext = outputContexts.find((ctx: any) =>
     ctx.name.endsWith("marcar_consulta_flow")
   );
-  // Lemos os parâmetros (ou definimos default)
+
+  // Variáveis do fluxo "Marcar Consulta"
   let state = marcarConsultaContext?.parameters?.state || "INITIAL";
   let chosenSlot = marcarConsultaContext?.parameters?.chosenSlot || "";
   let clientName = marcarConsultaContext?.parameters?.clientName || "";
@@ -233,10 +264,14 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
   console.log("Estado atual:", state);
 
+  // Resposta padrão se nada bater
   let responseText = "Desculpe, não entendi sua solicitação.";
 
   try {
     switch (intentName) {
+      /**
+       * Fluxo de MARCAR CONSULTA
+       */
       case "Marcar Consulta": {
         const calendarId = "jurami.junior@gmail.com";
 
@@ -303,6 +338,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             responseText =
               "Por favor, informe um nome válido. Exemplo: 'Meu nome é João Silva'.";
           } else {
+            // Remove "meu nome é" se houver
             clientName = userQuery.replace(/meu nome é/i, "").trim();
             responseText = `Obrigada, ${clientName}. Agora, informe o seu e-mail.`;
             state = "AWAITING_EMAIL";
@@ -356,6 +392,52 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
         break;
       }
 
+      /**
+       * Fluxo de CONSULTAR CONSULTAS MARCADAS
+       * Usamos DUAS Intents:
+       * 1. Consultar Consultas Marcadas (Início)  -> sem input context
+       * 2. Consultar Consultas Marcadas (Aguardando E-mail) -> input context = consultar_consulta_marcada_flow
+       */
+      case "Consultar Consultas Marcadas (Início)": {
+        // Aqui inicia o fluxo: outputContext => "consultar_consulta_marcada_flow"
+        // E pedimos o e-mail
+        responseText =
+          "Claro, por favor, me informe o seu e-mail para que possamos buscar suas consultas.";
+        // Se quiser salvar algo no "state" do fluxo, você pode. Ex:
+        // ...
+        break;
+      }
+
+      case "Consultar Consultas Marcadas (Aguardando E-mail)": {
+        // Agora a Intent tem inputContext = consultar_consulta_marcada_flow
+        // e este case só dispara se estivermos nesse contexto
+        const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
+        const emailMatch = userQuery.match(emailPattern);
+
+        if (!emailMatch || !emailMatch[1]) {
+          responseText =
+            "E-mail inválido. Por favor, informe um e-mail no formato correto.";
+        } else {
+          const clientEmail = emailMatch[1].trim();
+          const consultasMarcadas = await getBookedAppointments(
+            "jurami.junior@gmail.com",
+            clientEmail
+          );
+
+          if (consultasMarcadas.length === 0) {
+            responseText = `Não encontramos consultas marcadas para o e-mail ${clientEmail}.`;
+          } else {
+            responseText = `Consultas marcadas para o e-mail ${clientEmail}:\n${consultasMarcadas
+              .map(
+                (consulta, index) => `${index + 1} - ${consulta.description}`
+              )
+              .join("\n")}`;
+          }
+        }
+        break;
+      }
+
+      // Outras Intents mapeadas...
       case "saudacoes_e_boas_vindas":
         responseText = `Seja bem-vinda(o) ao consultório da *Nutri Materno-Infantil Sabrina Lagos*❕\n\n🛜 Aproveite e conheça melhor o trabalho da Nutri pelo Instagram: *@nutrisabrina.lagos*\nhttps://www.instagram.com/nutrisabrina.lagos\n\n*Dicas* para facilitar a nossa comunicação:\n📵 Esse número não atende ligações;\n🚫 Não ouvimos áudios;\n⚠️ Respondemos por ordem de recebimento da mensagem, por isso evite enviar a mesma mensagem mais de uma vez para não voltar ao final da fila.\n\nMe conta como podemos te ajudar❓`;
         break;
@@ -368,77 +450,11 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
         responseText = `Deixa eu te explicar como funciona o pré natal nutricional da Dra Sabrina \n\n A Dra Sabrina vai te ajudar a conduzir a sua gestação de forma saudável, mas sem complicar a sua rotina e sem mudanças radicais na sua alimentação.\n\n O foco do acompanhamento nutricional será no ganho de peso recomendado para o trimestre, no crescimento do bebê e na redução das chances de desenvolver complicações gestacionais. \n\n Além disso, ela prescreve toda a suplementação necessária durante a gestação, de acordo com o trimestre, com as necessidade da mamãe e do bebê, e sempre levando em consideração os resultados dos exames. \n\n Antes da primeira consulta será enviado um questionário, para que a Dra possa entender melhor as suas particularidades e, durante a consulta, consiga priorizar as questões mais importantes. \n\n Na primeira consulta, que dura em torno de 1h, ela vai te ouvir para poder entender a sua rotina e se aprofundar nas suas necessidades. \n\n Será aferido o seu peso, altura, circunferências e dobras cutâneas, para concluir seu Diagnóstico Nutricional e acompanhar a sua evolução de ganho de peso durante a gestação \n\n Pelos próximos 30 dias após a consulta, você conta com a facilidade de acessar todo o material da consulta (plano alimentar, receitas e prescrições, orientações, pedidos de exame, etc) pelo aplicativo da Dra. Sabrina.  \n\n O seu acompanhamento será feito pelo chat do app. Uma vez por semana durante os 30 dias, a Dra acessa o chat responder a todas as suas dúvidas.`;
         break;
 
-      case "Consultar Consultas Marcadas": {
-        console.log("Intenção 'Consultar Consultas Marcadas' acionada.");
-
-        // Vamos usar um "estado" separado para este fluxo
-        let consultarState =
-          req.body.queryResult.outputContexts?.find((ctx: any) =>
-            ctx.name.endsWith("consultar_consulta_marcada_flow")
-          )?.parameters?.state || "INITIAL";
-
-        if (intentName === "Consultar Consultas Marcadas") {
-          if (consultarState === "INITIAL") {
-            responseText =
-              "Por favor, informe o seu e-mail para que possamos buscar suas consultas marcadas.";
-            consultarState = "AWAITING_CLIENT_EMAIL";
-          } else if (consultarState === "AWAITING_CLIENT_EMAIL") {
-            const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
-            const emailMatch = userQuery.match(emailPattern);
-
-            if (!emailMatch || !emailMatch[1]) {
-              responseText =
-                "E-mail inválido. Por favor, informe um e-mail no formato correto.";
-            } else {
-              const clientEmail = emailMatch[1].trim();
-              const consultasMarcadas = await getBookedAppointments(
-                "jurami.junior@gmail.com",
-                clientEmail
-              );
-
-              if (consultasMarcadas.length === 0) {
-                responseText = `Não encontramos consultas marcadas para o e-mail ${clientEmail}.`;
-                consultarState = "FINISHED";
-              } else {
-                responseText = `Consultas marcadas para o e-mail ${clientEmail}:\n${consultasMarcadas
-                  .map(
-                    (consulta, index) =>
-                      `${index + 1} - ${consulta.description}`
-                  )
-                  .join("\n")}`;
-                consultarState = "FINISHED";
-              }
-            }
-          }
-
-          // Monta a resposta do fluxo de "Consultar Consultas Marcadas"
-          const responseJsonConsulta: any = {
-            fulfillmentText: responseText,
-            outputContexts: [
-              {
-                name: `${sessionPath}/contexts/consultar_consulta_marcada_flow`,
-                lifespanCount: consultarState === "FINISHED" ? 0 : 5,
-                parameters: {
-                  state: consultarState,
-                },
-              },
-            ],
-          };
-          console.log(
-            "Resposta enviada ao Dialogflow (Consultar Consultas Marcadas):",
-            responseJsonConsulta
-          );
-          res.json(responseJsonConsulta);
-          return; // para não cair na parte default
-        }
-        break;
-      }
-
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
         const consultasMarcadas = await getBookedAppointments(
           "jurami.junior@gmail.com",
-          clientEmail // Aqui você deve passar o e-mail do cliente como segundo argumento
+          clientEmail // e-mail do cliente
         );
         if (consultasMarcadas.length === 0) {
           responseText = "Você não possui consultas marcadas no momento.";
@@ -463,6 +479,10 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
         break;
       }
 
+      /**
+       * Se nenhuma das Intents acima bater, consideramos "não mapeada"
+       * e disparamos ChatGPT
+       */
       default: {
         console.log(
           "Intenção não mapeada, enviando mensagem para o ChatGPT..."
@@ -485,13 +505,13 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           availableSlots = [];
           currentIndex = 0;
 
-          // Configura a resposta do Dialogflow
+          // Configura a resposta do Dialogflow (sem contextos)
           const responseJson = {
             fulfillmentText: gptResponse,
-            outputContexts: [], // Remove os contextos ativos
+            outputContexts: [],
           };
 
-          // Reinicia o estado no mapa da conversa, se aplicável
+          // Se estiver usando Twilio, limpa o estado
           if (req.body.originalDetectIntentRequest?.payload?.data?.From) {
             const fromNumber =
               req.body.originalDetectIntentRequest.payload.data.From;
@@ -502,7 +522,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
           console.log("Estado e contexto reiniciados.");
           res.json(responseJson);
-          return;
+          return; // encerra
         } catch (error) {
           console.error("Erro ao processar resposta do GPT:", error);
           res.status(500).send("Erro ao processar a mensagem.");
@@ -511,8 +531,9 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
-    // Se chegou aqui, não era a Intent "Consultar Consultas Marcadas" (que já tem o return acima),
-    // então montamos a resposta de "Marcar Consulta" ou de outra Intent:
+    // Se chegou até aqui, foi uma das Intents mapeadas (exceto "default" que já deu return).
+    // Montamos a resposta do Dialogflow com o contexto "marcar_consulta_flow" ou outro,
+    // se for para continuar nesse fluxo.
     const responseJson: any = {
       fulfillmentText: responseText,
       outputContexts: [
@@ -544,6 +565,9 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+/**
+ * Rota /webhook para receber mensagens do WhatsApp (Twilio)
+ */
 app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
     console.log("=== Requisição recebida no /webhook (Twilio) ===");
@@ -558,9 +582,9 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
     const fromNumber = req.body.From;
     const incomingMessage = req.body.Body || "";
-    const audioUrl = req.body.MediaUrl0; // URL do áudio enviado pelo Twilio
-    // Se já temos um sessionId para este usuário, use-o. Caso contrário, crie um novo.
+    const audioUrl = req.body.MediaUrl0;
     let sessionId = userSessionMap[fromNumber];
+
     if (!sessionId) {
       sessionId = uuidv4();
       userSessionMap[fromNumber] = sessionId;
@@ -573,12 +597,13 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     console.log("Mensagem recebida do usuário:", incomingMessage);
     console.log("Audio URL:", audioUrl);
 
+    // Autenticação com Dialogflow
     const client = await auth.getClient();
     const accessToken = await client.getAccessToken();
 
     let finalUserMessage = incomingMessage;
 
-    // Verifica se é áudio e transcreve
+    // Se veio áudio, transcreve
     if (audioUrl) {
       try {
         console.log(`Áudio detectado. Transcrevendo áudio da URL: ${audioUrl}`);
@@ -591,10 +616,11 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
     }
 
+    // Verifica o estado atual no conversationStateMap
     const currentState = conversationStateMap[fromNumber]?.state || "";
     console.log("Estado atual da conversa para o usuário:", currentState);
 
-    // Adiciona prefixo conforme o estado
+    // Se estivermos num estado específico, adicionamos prefixos para “Meu nome é”, “Meu e-mail é”, etc.
     if (
       currentState === "AWAITING_NAME" &&
       !finalUserMessage.toLowerCase().includes("meu nome é")
@@ -617,6 +643,7 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
     console.log("Mensagem final enviada ao Dialogflow:", finalUserMessage);
 
+    // Envia a mensagem ao Dialogflow detectIntent
     const dialogflowResponse = await axios.post(
       `https://dialogflow.googleapis.com/v2/projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/${sessionId}:detectIntent`,
       {
@@ -636,19 +663,23 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       dialogflowResponse.data.queryResult.fulfillmentText ||
       "Desculpe, não entendi.";
 
+    // Lê o contexto (por ex. marcar_consulta_flow) retornado
     const outputContexts =
       dialogflowResponse.data.queryResult.outputContexts || [];
     const flowContext = outputContexts.find((ctx: any) =>
       ctx.name.endsWith("marcar_consulta_flow")
     );
+
+    // Atualiza o estado local
     let updatedState = flowContext?.parameters?.state || "";
     console.log("Novo estado retornado pelo Dialogflow:", updatedState);
 
-    // Salva o estado para a próxima mensagem do usuário
+    // Salva esse estado no conversationStateMap
     conversationStateMap[fromNumber] = {
       state: updatedState,
     };
 
+    // Divide e envia a resposta ao usuário
     const partesMensagem = dividirMensagem(fullResponseMessage);
     for (const parte of partesMensagem) {
       console.log("Enviando parte da mensagem ao usuário:", parte);
@@ -673,11 +704,15 @@ app.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// Inicia o servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
 
+/**
+ * Interface opcional para DialogflowContext
+ */
 interface DialogflowContext {
   name: string;
   lifespanCount: number;
