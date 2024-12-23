@@ -135,20 +135,25 @@ async function getAvailableSlots(
 }
 
 async function getBookedAppointments(
-  calendarId: string
+  calendarId: string,
+  clientEmail: string
 ): Promise<{ id: string; description: string }[]> {
   const response = await calendar.events.list({
     calendarId,
-    timeMin: new Date().toISOString(),
+    timeMin: new Date().toISOString(), // Busca eventos a partir do momento atual
     singleEvents: true,
     orderBy: "startTime",
   });
 
   const events = response.data.items || [];
-  return events.map((event) => ({
-    id: event.id || "",
-    description: event.summary || "Sem descrição",
-  }));
+
+  // Filtrar eventos que contenham o e-mail na descrição ou entre os participantes
+  return events
+    .filter((event) => event.description?.includes(clientEmail))
+    .map((event) => ({
+      id: event.id || "",
+      description: event.summary || "Sem descrição",
+    }));
 }
 
 async function deleteAppointment(
@@ -184,7 +189,7 @@ async function createEvent(
 
   const event = {
     summary: "Consulta",
-    description: `Consulta para ${clientName}. Contato: ${clientEmail}, ${clientPhone}`,
+    description: `Consulta para ${clientName}. E-mail: ${clientEmail}. Telefone: ${clientPhone}`,
     start: { dateTime: isoStartDateTime, timeZone },
     end: { dateTime: isoEndDateTime, timeZone },
   };
@@ -195,6 +200,7 @@ async function createEvent(
       requestBody: event,
     });
   } catch (err) {
+    console.error("Erro ao criar evento no Google Calendar:", err);
     throw err;
   }
 }
@@ -360,26 +366,47 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
       case "Consultar Consultas Marcadas": {
         console.log("Intenção 'Consultar Consultas Marcadas' acionada.");
-        const consultasMarcadas = await getBookedAppointments(
-          "jurami.junior@gmail.com"
-        );
 
-        if (consultasMarcadas.length === 0) {
-          responseText = "Você não possui consultas marcadas no momento.";
-          state = "FINISHED";
-        } else {
-          responseText = `Suas consultas marcadas:\n${consultasMarcadas
-            .map((consulta, index) => `${index + 1} - ${consulta.description}`)
-            .join("\n")}`;
+        if (state === "INITIAL") {
+          responseText =
+            "Por favor, informe o seu e-mail para que possamos buscar suas consultas marcadas.";
+          state = "AWAITING_CLIENT_EMAIL";
+        } else if (state === "AWAITING_CLIENT_EMAIL") {
+          const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
+          const emailMatch = userQuery.match(emailPattern);
+
+          if (!emailMatch || !emailMatch[1]) {
+            responseText =
+              "E-mail inválido. Por favor, informe um e-mail no formato correto.";
+          } else {
+            const clientEmail = emailMatch[1].trim();
+            const consultasMarcadas = await getBookedAppointments(
+              "jurami.junior@gmail.com",
+              clientEmail
+            );
+
+            if (consultasMarcadas.length === 0) {
+              responseText = `Não encontramos consultas marcadas para o e-mail ${clientEmail}.`;
+              state = "FINISHED";
+            } else {
+              responseText = `Consultas marcadas para o e-mail ${clientEmail}:\n${consultasMarcadas
+                .map(
+                  (consulta, index) => `${index + 1} - ${consulta.description}`
+                )
+                .join("\n")}`;
+              state = "FINISHED";
+            }
+          }
         }
         break;
       }
 
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
-        const consultasMarcadas: { id: string; description: string }[] =
-          await getBookedAppointments("jurami.junior@gmail.com");
-
+        const consultasMarcadas = await getBookedAppointments(
+          "jurami.junior@gmail.com",
+          clientEmail // Aqui você deve passar o e-mail do cliente como segundo argumento
+        );
         if (consultasMarcadas.length === 0) {
           responseText = "Você não possui consultas marcadas no momento.";
           state = "FINISHED";
