@@ -151,20 +151,20 @@ async function getBookedAppointments(
 ): Promise<{ id: string; description: string; date: string }[]> {
   const response = await calendar.events.list({
     calendarId,
-    timeMin: new Date().toISOString(),
+    timeMin: new Date().toISOString(), // Inclui apenas eventos futuros
     singleEvents: true,
     orderBy: "startTime",
   });
 
   const events = response.data.items || [];
 
-  // Filtro unificado para "consulta"
+  // Filtro unificado: considera apenas eventos que mencionam "consulta"
   return events
     .filter(
       (event) =>
-        (event.description?.toLowerCase().includes("consulta") || // Verifica "consulta" na descrição
-          event.summary?.toLowerCase().includes("consulta")) && // Ou no resumo
-        (event.description?.includes(clientEmail) || // Verifica o e-mail na descrição
+        (event.summary?.toLowerCase().includes("consulta") ||
+          event.description?.toLowerCase().includes("consulta")) && // Deve conter "consulta"
+        (event.description?.includes(clientEmail) || // E-mail na descrição
           event.attendees?.some((attendee) => attendee.email === clientEmail)) // Ou na lista de participantes
     )
     .map((event) => ({
