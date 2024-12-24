@@ -158,19 +158,21 @@ async function getBookedAppointments(
 
   const events = response.data.items || [];
 
+  // Filtrar apenas os eventos que são consultas
   return events
     .filter(
       (event) =>
-        event.description?.includes(clientEmail) ||
-        event.attendees?.some((attendee) => attendee.email === clientEmail)
+        (event.description?.toLowerCase().includes("consulta") || // Verifica se "consulta" está no campo description
+          event.summary?.toLowerCase().includes("consulta")) && // Ou no campo summary
+        (event.description?.includes(clientEmail) || // Verifica se o email está na descrição
+          event.attendees?.some((attendee) => attendee.email === clientEmail)) // Ou na lista de participantes
     )
     .map((event) => ({
       id: event.id || "",
       description: event.summary || "Consulta sem descrição",
-      date: format(
-        new Date(event.start?.dateTime || event.start?.date || ""),
-        "dd/MM/yyyy HH:mm"
-      ),
+      date: event.start?.dateTime
+        ? format(new Date(event.start.dateTime), "dd/MM/yyyy HH:mm")
+        : "Data não disponível",
     }));
 }
 
@@ -456,7 +458,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
         const consultasMarcadas = await getBookedAppointments(
-          "jurami.junior@gmail.com", // Email do cliente
+          "jurami.junior@gmail.com",
           clientEmail
         );
 
