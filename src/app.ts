@@ -149,6 +149,7 @@ async function getBookedAppointments(
   calendarId: string,
   clientEmail: string
 ): Promise<{ id: string; description: string; date: string }[]> {
+  const timeZone = "America/Sao_Paulo"; // Define o fuso horário
   const response = await calendar.events.list({
     calendarId,
     timeMin: new Date().toISOString(), // Inclui apenas eventos futuros
@@ -162,18 +163,25 @@ async function getBookedAppointments(
   return events
     .filter(
       (event) =>
-        (event.summary?.toLowerCase().includes("consulta") ||
-          event.description?.toLowerCase().includes("consulta")) && // Deve conter "consulta"
-        (event.description?.includes(clientEmail) || // E-mail na descrição
+        (event.summary?.toLowerCase().includes("consulta") || // Verifica se "consulta" está no campo summary
+          event.description?.toLowerCase().includes("consulta")) && // Ou no campo description
+        (event.description?.includes(clientEmail) || // Verifica se o e-mail está na descrição
           event.attendees?.some((attendee) => attendee.email === clientEmail)) // Ou na lista de participantes
     )
-    .map((event) => ({
-      id: event.id || "",
-      description: event.summary || "Consulta sem descrição",
-      date: event.start?.dateTime
-        ? format(new Date(event.start.dateTime), "dd/MM/yyyy HH:mm")
-        : "Data não disponível",
-    }));
+    .map((event) => {
+      // Ajuste de horário para o fuso correto
+      const eventStart = event.start?.dateTime
+        ? toZonedTime(new Date(event.start.dateTime), timeZone) // Ajusta o horário para o fuso
+        : null;
+
+      return {
+        id: event.id || "",
+        description: event.summary || "Consulta sem descrição",
+        date: eventStart
+          ? format(eventStart, "dd/MM/yyyy HH:mm", { timeZone }) // Formata a data/hora ajustada
+          : "Data não disponível",
+      };
+    });
 }
 
 /**
