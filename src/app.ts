@@ -458,8 +458,10 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       // =================================
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
+
+        // Obter consultas marcadas
         const consultasMarcadas = await getBookedAppointments(
-          "jurami.junior@gmail.com",
+          "jurami.junior@gmail.com", // Exemplo: substitua pelo ID real do calendário
           clientEmail
         );
 
@@ -467,6 +469,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           responseText = "Você não possui consultas marcadas no momento.";
           state = "FINISHED";
         } else {
+          // Gerar a mensagem com a lista de consultas disponíveis
           responseText = `Selecione a consulta que deseja desmarcar:\n${consultasMarcadas
             .map(
               (consulta, index) =>
@@ -475,12 +478,13 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             .join("\n")}\n\nResponda com o número correspondente.`;
           state = "AWAITING_CANCEL_SELECTION";
         }
+
         break;
       }
 
       case "Desmarcar Consultas - Seleção": {
         if (state === "AWAITING_CANCEL_SELECTION") {
-          const userNumber = parseInt(userQuery, 10); // Captura o número digitado pelo usuário.
+          const userNumber = parseInt(userQuery, 10); // Captura o número do usuário
           const consultasMarcadas = await getBookedAppointments(
             "jurami.junior@gmail.com",
             clientEmail
@@ -491,24 +495,25 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             userNumber >= 1 &&
             userNumber <= consultasMarcadas.length
           ) {
-            // Seleciona a consulta correspondente ao número.
+            // Seleciona a consulta correspondente
             const consultaSelecionada = consultasMarcadas[userNumber - 1];
+
+            // Remove a consulta do calendário
             await deleteAppointment(
               "jurami.junior@gmail.com",
               consultaSelecionada.id
             );
 
-            // Mensagem de confirmação.
+            // Confirmação ao usuário
             responseText = `A consulta "${consultaSelecionada.description}" marcada para ${consultaSelecionada.date} foi desmarcada com sucesso.`;
             state = "FINISHED";
           } else {
-            // Número inválido.
             responseText = `Número inválido. Por favor, escolha um número de 1 a ${consultasMarcadas.length}.`;
           }
         } else {
-          // Estado incorreto.
           responseText = "Desculpe, não entendi sua solicitação.";
         }
+
         break;
       }
 
@@ -580,27 +585,59 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
     // ========================
     const responseJson: any = {
       fulfillmentText: responseText,
-      outputContexts: [
-        {
-          name: `${sessionPath}/contexts/${
-            // Se a Intent for alguma sub-intent de marcar, setamos "marcar_consulta_flow"
-            intentName.startsWith("Marcar Consulta")
-              ? "marcar_consulta_flow"
-              : "consultar_consulta_marcada_flow"
-          }`,
-          lifespanCount: state === "FINISHED" ? 0 : 5,
-          parameters: {
-            state,
-            chosenSlot,
-            clientName,
-            clientEmail,
-            clientPhone,
-            availableSlots,
-            currentIndex,
-          },
-        },
-      ],
+      outputContexts: [],
     };
+
+    // Adiciona o contexto de "marcar_consulta_flow" se for relacionado
+    if (intentName.startsWith("Marcar Consulta")) {
+      responseJson.outputContexts.push({
+        name: `${sessionPath}/contexts/marcar_consulta_flow`,
+        lifespanCount: state === "FINISHED" ? 0 : 5,
+        parameters: {
+          state,
+          chosenSlot,
+          clientName,
+          clientEmail,
+          clientPhone,
+          availableSlots,
+          currentIndex,
+        },
+      });
+    }
+
+    // Adiciona o contexto de "consultar_consulta_marcada_flow" se for relacionado
+    if (intentName.startsWith("Consultar Consultas Marcadas")) {
+      responseJson.outputContexts.push({
+        name: `${sessionPath}/contexts/consultar_consulta_marcada_flow`,
+        lifespanCount: state === "FINISHED" ? 0 : 5,
+        parameters: {
+          state,
+          clientEmail,
+          clientName,
+          chosenSlot,
+          clientPhone,
+          availableSlots,
+          currentIndex,
+        },
+      });
+    }
+
+    // Adiciona o contexto de "desmarcar_consulta_flow" se for relacionado
+    if (intentName.startsWith("Desmarcar Consultas")) {
+      responseJson.outputContexts.push({
+        name: `${sessionPath}/contexts/desmarcar_consulta_flow`,
+        lifespanCount: state === "FINISHED" ? 0 : 5,
+        parameters: {
+          state,
+          clientEmail,
+          clientName,
+          chosenSlot,
+          clientPhone,
+          availableSlots,
+          currentIndex,
+        },
+      });
+    }
 
     console.log("Resposta enviada ao Dialogflow:", responseJson);
     res.json(responseJson);
