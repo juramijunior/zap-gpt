@@ -189,6 +189,7 @@ async function deleteAppointment(
       eventId,
     });
   } catch (error) {
+    console.error("Erro ao remover consulta:", error);
     throw new Error("Erro ao remover consulta.");
   }
 }
@@ -479,7 +480,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
       case "Desmarcar Consultas - Seleção": {
         if (state === "AWAITING_CANCEL_SELECTION") {
-          const userNumber = parseInt(userQuery, 10);
+          const userNumber = parseInt(userQuery, 10); // Captura o número digitado pelo usuário.
           const consultasMarcadas = await getBookedAppointments(
             "jurami.junior@gmail.com",
             clientEmail
@@ -490,16 +491,23 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             userNumber >= 1 &&
             userNumber <= consultasMarcadas.length
           ) {
+            // Seleciona a consulta correspondente ao número.
             const consultaSelecionada = consultasMarcadas[userNumber - 1];
             await deleteAppointment(
               "jurami.junior@gmail.com",
               consultaSelecionada.id
             );
-            responseText = `A consulta "${consultaSelecionada.description}" foi desmarcada com sucesso.`;
+
+            // Mensagem de confirmação.
+            responseText = `A consulta "${consultaSelecionada.description}" marcada para ${consultaSelecionada.date} foi desmarcada com sucesso.`;
             state = "FINISHED";
           } else {
+            // Número inválido.
             responseText = `Número inválido. Por favor, escolha um número de 1 a ${consultasMarcadas.length}.`;
           }
+        } else {
+          // Estado incorreto.
+          responseText = "Desculpe, não entendi sua solicitação.";
         }
         break;
       }
