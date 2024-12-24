@@ -158,13 +158,13 @@ async function getBookedAppointments(
 
   const events = response.data.items || [];
 
-  // Filtrar apenas os eventos que são consultas
+  // Filtro unificado para "consulta"
   return events
     .filter(
       (event) =>
-        (event.description?.toLowerCase().includes("consulta") || // Verifica se "consulta" está no campo description
-          event.summary?.toLowerCase().includes("consulta")) && // Ou no campo summary
-        (event.description?.includes(clientEmail) || // Verifica se o email está na descrição
+        (event.description?.toLowerCase().includes("consulta") || // Verifica "consulta" na descrição
+          event.summary?.toLowerCase().includes("consulta")) && // Ou no resumo
+        (event.description?.includes(clientEmail) || // Verifica o e-mail na descrição
           event.attendees?.some((attendee) => attendee.email === clientEmail)) // Ou na lista de participantes
     )
     .map((event) => ({
@@ -458,10 +458,8 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       // =================================
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
-
-        // Obter consultas marcadas
         const consultasMarcadas = await getBookedAppointments(
-          "jurami.junior@gmail.com", // Exemplo: substitua pelo ID real do calendário
+          "jurami.junior@gmail.com",
           clientEmail
         );
 
@@ -469,7 +467,6 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
           responseText = "Você não possui consultas marcadas no momento.";
           state = "FINISHED";
         } else {
-          // Gerar a mensagem com a lista de consultas disponíveis
           responseText = `Selecione a consulta que deseja desmarcar:\n${consultasMarcadas
             .map(
               (consulta, index) =>
@@ -478,7 +475,6 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             .join("\n")}\n\nResponda com o número correspondente.`;
           state = "AWAITING_CANCEL_SELECTION";
         }
-
         break;
       }
 
