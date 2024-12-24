@@ -148,7 +148,7 @@ async function getAvailableSlots(
 async function getBookedAppointments(
   calendarId: string,
   clientEmail: string
-): Promise<{ id: string; description: string }[]> {
+): Promise<{ id: string; description: string; date: string }[]> {
   const response = await calendar.events.list({
     calendarId,
     timeMin: new Date().toISOString(),
@@ -159,10 +159,18 @@ async function getBookedAppointments(
   const events = response.data.items || [];
 
   return events
-    .filter((event) => event.description?.includes(clientEmail))
+    .filter(
+      (event) =>
+        event.description?.includes(clientEmail) ||
+        event.attendees?.some((attendee) => attendee.email === clientEmail)
+    )
     .map((event) => ({
       id: event.id || "",
-      description: event.summary || "Sem descrição",
+      description: event.summary || "Consulta sem descrição",
+      date: format(
+        new Date(event.start?.dateTime || event.start?.date || ""),
+        "dd/MM/yyyy HH:mm"
+      ),
     }));
 }
 
@@ -204,8 +212,8 @@ async function createEvent(
   ).padStart(2, "0")}:${minute}:00`;
 
   const event = {
-    summary: "Consulta",
-    description: `Consulta para ${clientName}. E-mail: ${clientEmail}. Telefone: ${clientPhone}`,
+    summary: `Consulta com ${clientName}`,
+    description: `Detalhes:\nNome: ${clientName}\nE-mail: ${clientEmail}\nTelefone: ${clientPhone}\nData/Horário: ${chosenSlot}`,
     start: { dateTime: isoStartDateTime, timeZone },
     end: { dateTime: isoEndDateTime, timeZone },
   };
@@ -420,7 +428,7 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
         if (!emailMatch || !emailMatch[1]) {
           responseText =
-            "E-mail inválido. Por favor, informe um e-mail no formato correto (ex: exemplo@dominio.com).";
+            "Por favor, informe um e-mail válido no formato correto. Exemplo: exemplo@dominio.com.";
         } else {
           const emailBuscado = emailMatch[1].trim();
           const consultasMarcadas = await getBookedAppointments(
@@ -432,7 +440,10 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
             responseText = `Não encontramos consultas marcadas para o e-mail ${emailBuscado}.`;
           } else {
             responseText = `Consultas marcadas para o e-mail ${emailBuscado}:\n${consultasMarcadas
-              .map((c, i) => `${i + 1} - ${c.description}`)
+              .map(
+                (consulta, index) =>
+                  `${index + 1} - ${consulta.description} (${consulta.date})`
+              )
               .join("\n")}`;
           }
         }
@@ -445,28 +456,48 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
         const consultasMarcadas = await getBookedAppointments(
-          "jurami.junior@gmail.com",
+          "jurami.junior@gmail.com", // Email do cliente
           clientEmail
         );
+
         if (consultasMarcadas.length === 0) {
           responseText = "Você não possui consultas marcadas no momento.";
           state = "FINISHED";
         } else {
-          const availableSlots: { id: string; description: string }[] =
-            consultasMarcadas.map(
-              (consulta: { id: string; description: string }) => ({
-                id: consulta.id,
-                description: consulta.description,
-              })
-            );
-
-          responseText = `Selecione a consulta que deseja desmarcar:\n${availableSlots
+          responseText = `Selecione a consulta que deseja desmarcar:\n${consultasMarcadas
             .map(
-              (slot: { id: string; description: string }, index: number) =>
-                `${index + 1} - ${slot.description}`
+              (consulta, index) =>
+                `${index + 1} - ${consulta.description} (${consulta.date})`
             )
             .join("\n")}\n\nResponda com o número correspondente.`;
           state = "AWAITING_CANCEL_SELECTION";
+        }
+        break;
+      }
+
+      case "Desmarcar Consultas - Seleção": {
+        if (state === "AWAITING_CANCEL_SELECTION") {
+          const userNumber = parseInt(userQuery, 10);
+          const consultasMarcadas = await getBookedAppointments(
+            "jurami.junior@gmail.com",
+            clientEmail
+          );
+
+          if (
+            !isNaN(userNumber) &&
+            userNumber >= 1 &&
+            userNumber <= consultasMarcadas.length
+          ) {
+            const consultaSelecionada = consultasMarcadas[userNumber - 1];
+            await deleteAppointment(
+              "jurami.junior@gmail.com",
+              consultaSelecionada.id
+            );
+            responseText = `A consulta "${consultaSelecionada.description}" foi desmarcada com sucesso.`;
+            state = "FINISHED";
+          } else {
+            responseText = `Número inválido. Por favor, escolha um número de 1 a ${consultasMarcadas.length}.`;
+          }
         }
         break;
       }
