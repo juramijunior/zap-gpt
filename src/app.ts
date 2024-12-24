@@ -466,6 +466,22 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
       // =================================
       case "Desmarcar Consultas": {
         console.log("Intenção 'Desmarcar Consulta' acionada.");
+
+        // Busca o e-mail no contexto
+        const consultarContext = outputContexts.find((ctx: any) =>
+          ctx.name.endsWith("consultar_consulta_marcada_flow")
+        );
+        const clientEmail = consultarContext?.parameters?.clientEmail || "";
+
+        // Se o e-mail não está disponível, solicite
+        if (!clientEmail) {
+          responseText =
+            "Por favor, informe o seu e-mail para que eu possa verificar suas consultas marcadas.";
+          state = "AWAITING_EMAIL_FOR_CANCEL";
+          break;
+        }
+
+        // Lógica de cancelamento continua se o e-mail estiver disponível
         const consultasMarcadas = await getBookedAppointments(
           "jurami.junior@gmail.com",
           clientEmail
@@ -473,6 +489,44 @@ app.post("/fulfillment", async (req: Request, res: Response): Promise<void> => {
 
         if (consultasMarcadas.length === 0) {
           responseText = "Você não possui consultas marcadas no momento.";
+          state = "FINISHED";
+        } else {
+          responseText = `Selecione a consulta que deseja desmarcar:\n${consultasMarcadas
+            .map(
+              (consulta, index) =>
+                `${index + 1} - ${consulta.description} (${consulta.date})`
+            )
+            .join("\n")}\n\nResponda com o número correspondente.`;
+          state = "AWAITING_CANCEL_SELECTION";
+        }
+        break;
+      }
+
+      case "Desmarcar Consultas (Aguardando E-mail)": {
+        console.log(
+          "Intenção 'Desmarcar Consultas (Aguardando E-mail)' acionada."
+        );
+
+        // Extrai o e-mail do texto do usuário
+        const emailPattern = /([\w.-]+@[\w.-]+\.[a-zA-Z]{2,})/i;
+        const emailMatch = userQuery.match(emailPattern);
+
+        if (!emailMatch || !emailMatch[1]) {
+          responseText =
+            "O e-mail fornecido não parece ser válido. Por favor, envie novamente no formato correto (exemplo@dominio.com).";
+          break;
+        }
+
+        const clientEmail = emailMatch[1].trim();
+
+        // Salvar o e-mail no contexto
+        const consultasMarcadas = await getBookedAppointments(
+          "jurami.junior@gmail.com",
+          clientEmail
+        );
+
+        if (consultasMarcadas.length === 0) {
+          responseText = `Não encontramos consultas marcadas para o e-mail ${clientEmail}.`;
           state = "FINISHED";
         } else {
           responseText = `Selecione a consulta que deseja desmarcar:\n${consultasMarcadas
